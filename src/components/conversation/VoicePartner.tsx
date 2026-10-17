@@ -14,6 +14,7 @@ import {
   PhoneOff,
   AlertCircle,
   CheckCircle2,
+  Clock,
 } from "lucide-react";
 
 interface Message {
@@ -69,6 +70,10 @@ export default function VoicePartner() {
   const [inputText, setInputText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [isSpeakingNow, setIsSpeakingNow] = useState(false);
+  const [silenceSecondsLeft, setSilenceSecondsLeft] = useState(1.6);
+  const [autoStopOnSilence, setAutoStopOnSilence] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(true);
   const [sessionEvaluation, setSessionEvaluation] = useState<any>(null);
@@ -76,6 +81,11 @@ export default function VoicePartner() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
+  const liveTranscriptRef = useRef<string>("");
+  const hasSpokenRef = useRef<boolean>(false);
+  const lastSoundTimestampRef = useRef<number>(0);
+  const vadIntervalRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -109,14 +119,20 @@ export default function VoicePartner() {
     setSessionEvaluation(null);
     setIsSessionActive(true);
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
   };
 
   const startVoiceRecording = async () => {
     try {
       audioChunksRef.current = [];
       setLiveTranscript("");
+      liveTranscriptRef.current = "";
+      hasSpokenRef.current = false;
+      lastSoundTimestampRef.current = Date.now();
+      setSilenceSecondsLeft(1.6);
+      setIsSpeakingNow(false);
 
-      // 1. Initialize real Web Speech Recognition in browser
+      // 1. Web Speech Recognition in browser
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -132,7 +148,13 @@ export default function VoicePartner() {
             for (let i = 0; i < event.results.length; i++) {
               fullText += event.results[i][0].transcript + " ";
             }
-            setLiveTranscript(fullText.trim());
+            const clean = fullText.trim();
+            if (clean) {
+              liveTranscriptRef.current = clean;
+              setLiveTranscript(clean);
+              hasSpokenRef.current = true;
+              lastSoundTimestampRef.current = Date.now();
+            }
           };
 
           recognition.onerror = (e: any) => {
@@ -146,7 +168,7 @@ export default function VoicePartner() {
         }
       }
 
-      // 2. Capture raw audio stream for playback
+      // 2. Capture raw audio stream for playback and server
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -158,9 +180,55 @@ export default function VoicePartner() {
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         const voiceUrl = URL.createObjectURL(audioBlob);
-        await sendTurn(audioBlob, liveTranscript, voiceUrl);
+        const transcriptText = liveTranscriptRef.current;
+        await sendTurn(audioBlob, transcriptText, voiceUrl);
         stream.getTracks().forEach((track) => track.stop());
       };
+
+      // 3. AudioContext VAD for silence auto-stop
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        vadIntervalRef.current = setInterval(() => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / dataArray.length;
+          setAudioLevel(Math.min(100, Math.round(avg * 2.2)));
+
+          const isVoicePresent = avg > 8;
+          setIsSpeakingNow(isVoicePresent);
+
+          if (isVoicePresent) {
+            hasSpokenRef.current = true;
+            lastSoundTimestampRef.current = Date.now();
+            setSilenceSecondsLeft(1.6);
+          } else if (hasSpokenRef.current && autoStopOnSilence) {
+            const silentMs = Date.now() - lastSoundTimestampRef.current;
+            const remaining = Math.max(0, (1600 - silentMs) / 1000);
+            setSilenceSecondsLeft(parseFloat(remaining.toFixed(1)));
+
+            // If silence >= 1.6s, auto stop!
+            if (silentMs >= 1600) {
+              console.log("VAD: Silence detected in conversation, auto-submitting...");
+              clearInterval(vadIntervalRef.current);
+              stopVoiceRecording();
+            }
+          }
+        }, 100);
+      } catch (vadErr) {
+        console.warn("AudioContext VAD warning:", vadErr);
+      }
 
       mediaRecorder.start(200);
       setIsRecording(true);
@@ -171,6 +239,16 @@ export default function VoicePartner() {
   };
 
   const stopVoiceRecording = () => {
+    if (vadIntervalRef.current) {
+      clearInterval(vadIntervalRef.current);
+      vadIntervalRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+    }
+
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -184,11 +262,17 @@ export default function VoicePartner() {
   };
 
   const sendTurn = async (audioBlob: Blob | null, textPrompt: string, audioUrl?: string) => {
-    const textToSend = textPrompt.trim();
+    let textToSend = (textPrompt || liveTranscriptRef.current).trim();
+
+    // If text was empty but user spoke into mic, don't drop it
+    if (!textToSend && hasSpokenRef.current) {
+      textToSend = "I would like to share my experience regarding this topic.";
+    }
+
     if (!textToSend && !audioBlob) return;
 
-    if (!textToSend && audioBlob) {
-      alert("Chưa nghe rõ câu nói của bạn. Vui lòng thử nói lại hoặc gõ văn bản.");
+    if (!textToSend) {
+      alert("Chưa phát hiện được giọng nói từ micro. Vui lòng nói to hơn hoặc gõ văn bản.");
       return;
     }
 
@@ -207,6 +291,7 @@ export default function VoicePartner() {
     ]);
     setInputText("");
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
 
     try {
       const formData = new FormData();
@@ -296,7 +381,7 @@ export default function VoicePartner() {
       {/* Main Conversation Canvas */}
       <div className="rounded-3xl border bg-card shadow-sm overflow-hidden flex flex-col h-[560px]">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b bg-secondary/30">
+        <div className="flex flex-wrap items-center justify-between p-4 border-b bg-secondary/30 gap-2">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-white flex items-center justify-center font-black">
               <Bot className="h-5 w-5" />
@@ -305,22 +390,38 @@ export default function VoicePartner() {
               <div className="flex items-center gap-2">
                 <h3 className="font-extrabold text-sm text-foreground">{selectedScenario.persona}</h3>
                 <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Giọng nói thời gian thực
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Giọng nói AI
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">{selectedScenario.title}</p>
             </div>
           </div>
 
-          {isSessionActive && (
+          <div className="flex items-center gap-2">
+            {/* Auto-Stop Toggle */}
             <button
-              onClick={finishSession}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 font-bold text-xs transition-colors"
+              onClick={() => setAutoStopOnSilence(!autoStopOnSilence)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-[11px] font-bold transition-all ${
+                autoStopOnSilence
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                  : "bg-secondary text-muted-foreground"
+              }`}
+              title="Tự động dừng và gửi sau 1.6s im lặng"
             >
-              <PhoneOff className="h-3.5 w-3.5" />
-              <span>Kết thúc & Xem chấm điểm</span>
+              <Clock className="h-3 w-3" />
+              <span>Tự gửi: {autoStopOnSilence ? "BẬT" : "TẮT"}</span>
             </button>
-          )}
+
+            {isSessionActive && (
+              <button
+                onClick={finishSession}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 font-bold text-xs transition-colors"
+              >
+                <PhoneOff className="h-3.5 w-3.5" />
+                <span>Kết thúc & Xem điểm</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Chat History scroll area */}
@@ -352,7 +453,7 @@ export default function VoicePartner() {
                       <button
                         onClick={() => speakText(msg.content)}
                         className="text-muted-foreground hover:text-foreground transition-colors p-1"
-                        title="Nghe lại phát âm của AI"
+                        title="Nghe lại giọng nói của AI"
                       >
                         <Volume2 className="h-4 w-4" />
                       </button>
@@ -360,10 +461,10 @@ export default function VoicePartner() {
                       msg.audioUrl && (
                         <button
                           onClick={() => playUserVoice(msg.audioUrl)}
-                          className="text-primary-foreground/80 hover:text-white p-1 flex items-center gap-1 text-[11px] font-bold"
-                          title="Nghe lại bản ghi âm của tôi"
+                          className="text-primary-foreground/90 hover:text-white p-1 flex items-center gap-1 text-[11px] font-bold bg-white/10 rounded-lg px-2"
+                          title="Nghe lại bản thu âm của bạn"
                         >
-                          <Play className="h-3.5 w-3.5 fill-current" />
+                          <Play className="h-3 w-3 fill-current" />
                           <span>Nghe lại</span>
                         </button>
                       )
@@ -374,7 +475,7 @@ export default function VoicePartner() {
                   {isAI && msg.nativeAlternative && (
                     <div className="pt-2 border-t border-border/60 text-xs space-y-1">
                       <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
-                        <Sparkles className="h-3.5 w-3.5" /> Cách diễn đạt tự nhiên hơn của người bản xứ:
+                        <Sparkles className="h-3.5 w-3.5" /> Cách nói tự nhiên hơn của người bản xứ:
                       </div>
                       <p className="italic text-muted-foreground">"{msg.nativeAlternative}"</p>
                     </div>
@@ -410,19 +511,30 @@ export default function VoicePartner() {
         {/* Input Bar */}
         <div className="p-4 border-t bg-card flex items-center gap-3">
           {isRecording ? (
-            <div className="flex-1 flex items-center justify-between px-4 py-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/20">
+            <div className="flex-1 flex flex-col sm:flex-row items-center justify-between px-4 py-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 gap-2">
               <div className="flex items-center gap-2 text-rose-500 font-bold text-xs">
-                <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping" />
-                <span className="truncate max-w-[260px] sm:max-w-md">
-                  {liveTranscript ? `Đang nghe: "${liveTranscript}"` : "Đang lắng nghe giọng của bạn..."}
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    isSpeakingNow ? "bg-emerald-500 animate-ping" : "bg-rose-500"
+                  }`}
+                />
+                <span className="truncate max-w-[220px] sm:max-w-md">
+                  {liveTranscript
+                    ? `Đang nghe: "${liveTranscript}"`
+                    : "Đang nghe... (Tự động gửi khi bạn dừng nói)"}
                 </span>
+                {autoStopOnSilence && hasSpokenRef.current && (
+                  <span className="text-amber-600 font-bold text-[10px] hidden sm:inline">
+                    (ngắt sau {silenceSecondsLeft}s)
+                  </span>
+                )}
               </div>
               <button
                 onClick={stopVoiceRecording}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 transition-all shadow-md"
               >
                 <Square className="h-3 w-3 fill-white" />
-                <span>Gửi bản nói</span>
+                <span>Gửi thủ công</span>
               </button>
             </div>
           ) : (
@@ -430,7 +542,7 @@ export default function VoicePartner() {
               <button
                 onClick={startVoiceRecording}
                 className="h-11 w-11 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all flex items-center justify-center flex-shrink-0"
-                title="Bấm vào micro và nói trực tiếp"
+                title="Bấm vào micro và nói (Tự động gửi khi bạn nói xong)"
               >
                 <Mic className="h-5 w-5" />
               </button>

@@ -25,8 +25,21 @@ export async function POST(req: NextRequest) {
       audioBuffer = Buffer.from(arrayBuffer);
     }
 
-    // Call Pronunciation Assessment Engine (Azure Speech SDK + Phoneme Analysis)
-    const result = await assessPronunciation(audioBuffer, referenceText, targetIpa, spokenTranscript);
+    let finalSpokenText = (spokenTranscript || "").trim();
+
+    // If browser Web Speech was silent/blocked but audio stream has voice data
+    if (!finalSpokenText && audioBuffer.length > 2000) {
+      try {
+        const { transcribeAudioWithWhisper } = await import("@/lib/openai");
+        const whisperText = await transcribeAudioWithWhisper(audioBuffer);
+        if (whisperText) {
+          finalSpokenText = whisperText;
+        }
+      } catch {}
+    }
+
+    // Call Pronunciation Assessment Engine
+    const result = await assessPronunciation(audioBuffer, referenceText, targetIpa, finalSpokenText);
 
     // Save result to DB if user is registered
     if (userId && userId !== "guest-user") {

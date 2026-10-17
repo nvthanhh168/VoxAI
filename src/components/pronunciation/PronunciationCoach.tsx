@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Mic,
   Square,
@@ -13,7 +13,9 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
+  Clock,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { MOCK_PRONUNCIATION_DRILLS } from "@/lib/mock-data";
 import { getScoreColor } from "@/lib/utils";
@@ -48,11 +50,19 @@ export default function PronunciationCoach() {
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [xpGained, setXpGained] = useState<number | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string>("");
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [isSpeakingNow, setIsSpeakingNow] = useState<boolean>(false);
+  const [autoStopOnSilence, setAutoStopOnSilence] = useState<boolean>(true);
+  const [silenceSecondsLeft, setSilenceSecondsLeft] = useState<number>(1.5);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
-  const recordedBlobRef = useRef<Blob | null>(null);
+  const liveTranscriptRef = useRef<string>("");
+  const hasSpokenRef = useRef<boolean>(false);
+  const lastSoundTimestampRef = useRef<number>(0);
+  const vadIntervalRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Play target reference audio via SpeechSynthesis
   const playNativeSample = (text: string) => {
@@ -70,10 +80,16 @@ export default function PronunciationCoach() {
       setSelectedWord(null);
       setXpGained(null);
       setLiveTranscript("");
+      liveTranscriptRef.current = "";
+      hasSpokenRef.current = false;
+      lastSoundTimestampRef.current = Date.now();
       setRecordedAudioUrl(null);
+      setAudioLevel(0);
+      setIsSpeakingNow(false);
+      setSilenceSecondsLeft(1.5);
       audioChunksRef.current = [];
 
-      // 1. Initialize real-time Web Speech Recognition in browser
+      // 1. Initialize Web Speech Recognition
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -89,21 +105,27 @@ export default function PronunciationCoach() {
             for (let i = 0; i < event.results.length; i++) {
               fullTranscript += event.results[i][0].transcript + " ";
             }
-            setLiveTranscript(fullTranscript.trim());
+            const clean = fullTranscript.trim();
+            if (clean) {
+              liveTranscriptRef.current = clean;
+              setLiveTranscript(clean);
+              hasSpokenRef.current = true;
+              lastSoundTimestampRef.current = Date.now();
+            }
           };
 
           recognition.onerror = (e: any) => {
-            console.warn("SpeechRecognition event warning:", e.error);
+            console.warn("SpeechRecognition notice:", e.error);
           };
 
           recognition.start();
           recognitionRef.current = recognition;
         } catch (recErr) {
-          console.warn("Recognition start warning:", recErr);
+          console.warn("SpeechRecognition init exception:", recErr);
         }
       }
 
-      // 2. Initialize MediaRecorder to capture student voice audio
+      // 2. Capture audio stream with MediaRecorder
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -116,23 +138,77 @@ export default function PronunciationCoach() {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        recordedBlobRef.current = audioBlob;
         const audioUrl = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(audioUrl);
-        await submitRecording(audioBlob);
+        await submitRecording(audioBlob, liveTranscriptRef.current);
         stream.getTracks().forEach((track) => track.stop());
       };
+
+      // 3. AudioContext VAD (Voice Activity Detection) for silence auto-stop
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        vadIntervalRef.current = setInterval(() => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / dataArray.length;
+          setAudioLevel(Math.min(100, Math.round(avg * 2.2)));
+
+          const isVoicePresent = avg > 8; // threshold for voice
+          setIsSpeakingNow(isVoicePresent);
+
+          if (isVoicePresent) {
+            hasSpokenRef.current = true;
+            lastSoundTimestampRef.current = Date.now();
+            setSilenceSecondsLeft(1.5);
+          } else if (hasSpokenRef.current && autoStopOnSilence) {
+            const silentMs = Date.now() - lastSoundTimestampRef.current;
+            const remaining = Math.max(0, (1500 - silentMs) / 1000);
+            setSilenceSecondsLeft(parseFloat(remaining.toFixed(1)));
+
+            // If user has spoken, and silence lasts >= 1.5s, auto-stop!
+            if (silentMs >= 1500) {
+              console.log("VAD: Silence detected for 1.5s, auto-stopping recording...");
+              clearInterval(vadIntervalRef.current);
+              stopRecording();
+            }
+          }
+        }, 100);
+      } catch (vadErr) {
+        console.warn("AudioContext VAD warning:", vadErr);
+      }
 
       mediaRecorder.start(200);
       setIsRecording(true);
     } catch (err) {
-      console.warn("Microphone access failed, prompting user:", err);
-      alert("Vui lòng cấp quyền Microphone trên trình duyệt để luyện tập phát âm.");
+      console.warn("Microphone access failed:", err);
+      alert("Vui lòng cấp quyền Microphone trên trình duyệt để ghi âm giọng nói.");
       setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
+    if (vadIntervalRef.current) {
+      clearInterval(vadIntervalRef.current);
+      vadIntervalRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+    }
+
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -145,7 +221,7 @@ export default function PronunciationCoach() {
     setIsRecording(false);
   };
 
-  const submitRecording = async (blob: Blob | null) => {
+  const submitRecording = async (blob: Blob | null, finalTranscript: string) => {
     setIsAssessing(true);
     try {
       const formData = new FormData();
@@ -154,7 +230,7 @@ export default function PronunciationCoach() {
       }
       formData.append("referenceText", currentDrill.sentence);
       formData.append("targetIpa", currentDrill.ipa);
-      formData.append("spokenTranscript", liveTranscript);
+      formData.append("spokenTranscript", finalTranscript || liveTranscriptRef.current);
       formData.append("userId", "demo-user");
 
       const response = await fetch("/api/speech/assess", {
@@ -184,13 +260,14 @@ export default function PronunciationCoach() {
     setRecordedAudioUrl(null);
     setXpGained(null);
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Exercise Card */}
       <div className="relative overflow-hidden rounded-3xl border bg-card p-6 sm:p-8 shadow-sm">
-        <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wide">
               {currentDrill.level} Pronunciation Drill
@@ -200,13 +277,29 @@ export default function PronunciationCoach() {
             </span>
           </div>
 
-          <button
-            onClick={nextSentence}
-            className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border bg-secondary/50"
-          >
-            <span>Câu tiếp theo</span>
-            <ChevronRight className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Auto-Stop on silence toggle */}
+            <button
+              onClick={() => setAutoStopOnSilence(!autoStopOnSilence)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                autoStopOnSilence
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                  : "bg-secondary text-muted-foreground"
+              }`}
+              title="Tự động dừng ghi âm sau 1.5s im lặng"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              <span>Tự ngắt khi im lặng: {autoStopOnSilence ? "BẬT" : "TẮT"}</span>
+            </button>
+
+            <button
+              onClick={nextSentence}
+              className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-xl border bg-secondary/50"
+            >
+              <span>Câu tiếp</span>
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Target Sentence Display */}
@@ -232,7 +325,7 @@ export default function PronunciationCoach() {
         <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 text-xs sm:text-sm">
           <Info className="h-4 w-4 flex-shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <div>
-            <span className="font-bold">Mẹo từ huấn luyện viên: </span>
+            <span className="font-bold">Mẹo huấn luyện viên: </span>
             <span>{currentDrill.tips}</span>
           </div>
         </div>
@@ -240,44 +333,71 @@ export default function PronunciationCoach() {
         {/* Recording Visualizer and Action Bar */}
         <div className="mt-8 flex flex-col items-center justify-center py-6 border-t border-border">
           {isRecording ? (
-            <div className="flex flex-col items-center gap-4 w-full max-w-md text-center">
-              {/* Sound waves animation */}
-              <div className="flex items-center justify-center gap-1.5 h-12">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((bar) => (
-                  <div
-                    key={bar}
-                    className="w-1.5 bg-rose-500 rounded-full wave-bar"
-                    style={{
-                      height: `${20 + (bar % 3) * 15}px`,
-                      animationDelay: `${bar * 0.1}s`,
-                    }}
-                  />
-                ))}
+            <div className="flex flex-col items-center gap-4 w-full max-w-lg text-center">
+              {/* Voice level & Sound wave visualizer */}
+              <div className="flex items-center justify-center gap-1.5 h-12 w-full">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((bar) => {
+                  const barHeight = Math.max(6, Math.min(45, (audioLevel / 100) * 45 + (bar % 3) * 6));
+                  return (
+                    <div
+                      key={bar}
+                      className={`w-2 rounded-full transition-all duration-75 ${
+                        isSpeakingNow ? "bg-emerald-500" : "bg-rose-500/60"
+                      }`}
+                      style={{ height: `${barHeight}px` }}
+                    />
+                  );
+                })}
               </div>
 
-              {/* Real-time speech transcription display */}
-              <div className="p-3 w-full rounded-2xl bg-rose-500/10 border border-rose-500/20">
-                <span className="text-[11px] font-bold text-rose-500 block mb-1 uppercase tracking-wider">
-                  🔴 Đang thu âm & nhận diện giọng nói thực tế:
-                </span>
-                <p className="text-sm font-semibold text-foreground italic">
-                  {liveTranscript ? `"${liveTranscript}"` : "Hãy bắt đầu phát âm câu mẫu..."}
-                </p>
+              {/* Status banner with silence countdown */}
+              <div className="p-4 w-full rounded-2xl bg-secondary/70 border border-border space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full ${
+                        isSpeakingNow ? "bg-emerald-500 animate-ping" : "bg-amber-500"
+                      }`}
+                    />
+                    <span className={isSpeakingNow ? "text-emerald-600" : "text-amber-600"}>
+                      {isSpeakingNow ? "Đang thu nhận giọng nói..." : "Đang chờ bạn phát âm..."}
+                    </span>
+                  </div>
+
+                  {autoStopOnSilence && hasSpokenRef.current && (
+                    <span className="text-amber-600 dark:text-amber-400 font-extrabold text-[11px]">
+                      ⏱️ Im lặng {silenceSecondsLeft}s nữa sẽ tự ngắt
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-left bg-background/80 p-3 rounded-xl border border-border/60">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">
+                    Văn bản nhận diện trực tiếp:
+                  </span>
+                  <p className="text-sm font-bold text-foreground">
+                    {liveTranscript || (
+                      <span className="text-muted-foreground italic font-normal">
+                        Bắt đầu đọc câu tiếng Anh ở trên...
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
 
               <button
                 onClick={stopRecording}
-                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-sm shadow-lg shadow-rose-500/30 transition-all hover:scale-105"
+                className="flex items-center gap-2 px-7 py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-sm shadow-lg shadow-rose-500/30 transition-all hover:scale-105"
               >
                 <Square className="h-4 w-4 fill-white" />
-                <span>Hoàn tất & Chấm điểm</span>
+                <span>Dừng & Nộp bài thủ công</span>
               </button>
             </div>
           ) : isAssessing ? (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <RefreshCw className="h-8 w-8 text-blue-500 animate-spin" />
+            <div className="flex flex-col items-center gap-3 py-6">
+              <RefreshCw className="h-9 w-9 text-blue-500 animate-spin" />
               <p className="text-sm font-bold text-foreground">
-                Hệ thống AI đang đối chiếu âm tiết và phân tích phát âm thực tế...
+                AI đang đối chiếu giọng nói và chấm điểm từng âm tiết...
               </p>
             </div>
           ) : (
@@ -290,7 +410,7 @@ export default function PronunciationCoach() {
                 <Mic className="h-8 w-8" />
               </button>
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Nhấn vào Micro để bắt đầu phát âm
+                Bấm vào Micro để phát âm (Tự động nộp khi đọc xong)
               </p>
             </div>
           )}
@@ -311,7 +431,7 @@ export default function PronunciationCoach() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Đánh giá dựa trên chính xác lời bạn đã nói vào micro
+                Đánh giá chuẩn xác theo đúng lời bạn vừa thu âm
               </p>
             </div>
 
@@ -345,7 +465,7 @@ export default function PronunciationCoach() {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-foreground flex items-center gap-2">
                   <Play className="h-4 w-4 text-primary fill-primary" />
-                  Nghe lại bản ghi âm giọng nói của bạn:
+                  Nghe lại bản thu âm của bạn:
                 </span>
                 <button
                   onClick={() => playNativeSample(currentDrill.sentence)}
@@ -357,11 +477,10 @@ export default function PronunciationCoach() {
 
               <audio src={recordedAudioUrl} controls className="w-full h-10 rounded-xl" />
 
-              {/* What was detected */}
               <div className="text-xs text-muted-foreground pt-1 flex items-start gap-1">
-                <span className="font-bold text-foreground">Bạn đã nói:</span>
-                <span className="italic text-foreground font-medium">
-                  "{assessment.spokenTextDetected || liveTranscript || "(Không có âm thanh)"}"
+                <span className="font-bold text-foreground">Hệ thống nhận diện được:</span>
+                <span className="italic text-foreground font-semibold">
+                  "{assessment.spokenTextDetected || "(Không nhận diện được từ nào)"}"
                 </span>
               </div>
             </div>

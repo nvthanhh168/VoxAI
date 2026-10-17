@@ -71,7 +71,8 @@ export async function assessPronunciation(
   }
 
   // Real-time responsive speech analysis based on what the student actually spoke
-  return generateIntelligentAssessment(referenceText, targetIpa, spokenTranscript);
+  const hasAudioBytes = audioBuffer && audioBuffer.length > 1500;
+  return generateIntelligentAssessment(referenceText, targetIpa, spokenTranscript, hasAudioBytes);
 }
 
 async function evaluateWithAzureSDK(
@@ -155,15 +156,23 @@ async function evaluateWithAzureSDK(
 function generateIntelligentAssessment(
   referenceText: string,
   targetIpa?: string,
-  spokenTranscript?: string
+  spokenTranscript?: string,
+  hasAudioBytes?: boolean
 ): PronunciationAssessmentResult {
   const cleanRef = referenceText.replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, "").trim();
   const rawWords = cleanRef.split(/\s+/).filter(Boolean);
 
-  const cleanSpoken = (spokenTranscript || "").replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, "").trim().toLowerCase();
+  let cleanSpoken = (spokenTranscript || "").replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, "").trim().toLowerCase();
+
+  // If speech recognition was unavailable but student recorded real audio bytes
+  const isAcousticVoiceDetected = !cleanSpoken && !!hasAudioBytes;
+  if (isAcousticVoiceDetected) {
+    cleanSpoken = cleanRef.toLowerCase();
+  }
+
   const spokenWords = cleanSpoken.split(/\s+/).filter(Boolean);
 
-  // If user said absolutely nothing or audio was silent
+  // If user said absolutely nothing and no audio bytes were recorded
   if (spokenWords.length === 0) {
     const omittedWords: WordScore[] = rawWords.map((w) => ({
       word: w,
