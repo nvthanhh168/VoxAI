@@ -19,6 +19,7 @@ import {
   Crown,
   ShieldCheck,
   ChevronRight,
+  User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ const MORE_NAV_ITEMS = [
   { href: "/placement-test", label: "Kiểm tra trình độ CEFR", icon: GraduationCap, desc: "Đo lường năng lực A1 - C2" },
   { href: "/leaderboard", label: "Bảng xếp hạng & XP", icon: Trophy, desc: "Đua top học viên tích cực" },
   { href: "/subscription", label: "Bảng giá & Gói cước", icon: Crown, desc: "Nâng cấp tài khoản VIP" },
+  { href: "/profile", label: "Hồ sơ & Cài đặt cá nhân", icon: User, desc: "Chỉnh tốc độ giọng AI, CEFR & Đăng xuất" },
   { href: "/admin", label: "Cổng Quản trị Super Admin", icon: ShieldCheck, badge: "Master", desc: "Toàn quyền điều hành hệ thống" },
 ];
 

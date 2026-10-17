@@ -16,6 +16,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
+import { speakNaturalEnglish } from "@/lib/speech-voice";
 
 interface IELTSPart {
   partNumber: number;
@@ -77,12 +78,7 @@ export default function MockIELTSTestPage() {
   const recognitionRef = useRef<any>(null);
 
   const speakExaminerPrompt = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "en-US";
-    utt.rate = 0.92;
-    window.speechSynthesis.speak(utt);
+    speakNaturalEnglish(text, { rate: 0.92, pitch: 1.0 });
   };
 
   const startPreparation = () => {

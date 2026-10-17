@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { TECH_ARTICLES, NewsArticle } from "@/lib/news-data";
+import { TECH_ARTICLES, NewsArticle, getFormattedDate } from "@/lib/news-data";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,7 +12,11 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
-    let articles: NewsArticle[] = [...TECH_ARTICLES];
+    // Refresh dynamic date relative to current invocation
+    let articles: NewsArticle[] = TECH_ARTICLES.map((art, idx) => ({
+      ...art,
+      publishedDate: getFormattedDate(Math.floor(idx / 3)),
+    }));
 
     if (category && category !== "all" && category !== "Tất cả") {
       articles = articles.filter((a) => a.category.toLowerCase() === category.toLowerCase());

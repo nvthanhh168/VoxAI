@@ -15,6 +15,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { COMMON_GRAMMAR_MISTAKES, CommonMistake } from "@/lib/mock-data";
+import { speakNaturalEnglish } from "@/lib/speech-voice";
 
 export default function GrammarCoach() {
   const [inputText, setInputText] = useState("I am agree with your proposal because he go to school everyday.");
@@ -50,12 +51,7 @@ export default function GrammarCoach() {
   };
 
   const speakText = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "en-US";
-    utt.rate = 0.92;
-    window.speechSynthesis.speak(utt);
+    speakNaturalEnglish(text, { rate: 0.92, pitch: 1.02 });
   };
 
   const applyCommonMistake = (item: CommonMistake) => {

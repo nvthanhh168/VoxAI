@@ -33,6 +33,7 @@ const NAV_ITEMS = [
   { href: "/placement-test", label: "Placement Test", icon: GraduationCap },
   { href: "/leaderboard", label: "Leaderboard & XP", icon: Trophy },
   { href: "/subscription", label: "Pricing & Plans", icon: Crown },
+  { href: "/profile", label: "Profile & Settings", icon: Settings },
   { href: "/admin", label: "Admin Portal", icon: ShieldCheck },
 ];
 
