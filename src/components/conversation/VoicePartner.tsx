@@ -10,16 +10,17 @@ import {
   Sparkles,
   Bot,
   User as UserIcon,
-  Award,
-  CheckCircle2,
-  AlertCircle,
+  Play,
   PhoneOff,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  audioUrl?: string;
   corrections?: string[];
   nativeAlternative?: string;
   grammarTip?: string;
@@ -28,30 +29,30 @@ interface Message {
 const SCENARIOS = [
   {
     id: "JOB_INTERVIEW",
-    title: "Senior Product Manager Interview",
+    title: "Phỏng vấn Senior Product Manager",
     persona: "Sarah (Hiring VP)",
-    description: "Discuss leadership, conflict resolution, and product analytics.",
-    initialPrompt: "Welcome Alex! Thanks for coming in. To start off, could you walk me through a major product initiative you spearheaded?",
+    description: "Thảo luận về kỹ năng lãnh đạo, giải quyết mâu thuẫn và số liệu sản phẩm.",
+    initialPrompt: "Welcome Alex! Thanks for coming in today. To start off, could you walk me through a major product initiative you spearheaded in your previous role?",
   },
   {
     id: "RESTAURANT_ORDERING",
-    title: "Boutique NYC Bistro",
+    title: "Nhà hàng Pháp Bistro tại New York",
     persona: "Marco (Head Waiter)",
-    description: "Order wine pairings, customize ingredients, and ask for dessert.",
-    initialPrompt: "Good evening! Welcome to Le Bistro. Have you had a chance to look over the menu, or can I recommend our daily specials?",
+    description: "Gọi món, hỏi về thành phần món ăn và phong cách phục vụ lịch sự.",
+    initialPrompt: "Good evening! Welcome to Le Bistro. Have you had a chance to look over the menu, or may I recommend our chef's daily specials?",
   },
   {
     id: "AIRPORT_TRAVEL",
-    title: "International Flight Transfer",
+    title: "Thủ tục Hải quan Sân bay Quốc tế",
     persona: "Officer Davies (Customs)",
-    description: "Navigate customs declarations, baggage delays, and boarding gates.",
-    initialPrompt: "Passport and boarding pass please. What is the primary purpose of your trip to London?",
+    description: "Giao tiếp tại cửa kiểm soát an ninh và khai báo hải quan nhập cảnh.",
+    initialPrompt: "Passport and boarding pass, please. What is the primary purpose of your visit to London, and how long do you intend to stay?",
   },
   {
     id: "IELTS_SPEAKING_PART_2",
-    title: "IELTS Speaking Examiner (Band 8+)",
+    title: "Giám khảo thi Mock IELTS Speaking (Band 8+)",
     persona: "Examiner Wilson",
-    description: "Describe an ambition you have had for a long time. Speak for 2 minutes.",
+    description: "Nói về một mục tiêu hoặc trải nghiệm cá nhân liên tục trong 2 phút.",
     initialPrompt: "Now, I am going to give you a topic. I'd like you to talk about an ambition you have had for a long time. You have one minute to prepare, then start speaking.",
   },
 ];
@@ -67,25 +68,33 @@ export default function VoicePartner() {
   ]);
   const [inputText, setInputText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(true);
   const [sessionEvaluation, setSessionEvaluation] = useState<any>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<any>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, liveTranscript]);
 
   const speakText = (text: string) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
-    utterance.rate = 1.0;
+    utterance.rate = 0.95;
     window.speechSynthesis.speak(utterance);
+  };
+
+  const playUserVoice = (audioUrl?: string) => {
+    if (!audioUrl) return;
+    const audio = new Audio(audioUrl);
+    audio.play();
   };
 
   const handleScenarioChange = (scenario: typeof SCENARIOS[0]) => {
@@ -99,11 +108,45 @@ export default function VoicePartner() {
     ]);
     setSessionEvaluation(null);
     setIsSessionActive(true);
+    setLiveTranscript("");
   };
 
   const startVoiceRecording = async () => {
     try {
       audioChunksRef.current = [];
+      setLiveTranscript("");
+
+      // 1. Initialize real Web Speech Recognition in browser
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.lang = "en-US";
+          recognition.continuous = true;
+          recognition.interimResults = true;
+
+          recognition.onresult = (event: any) => {
+            let fullText = "";
+            for (let i = 0; i < event.results.length; i++) {
+              fullText += event.results[i][0].transcript + " ";
+            }
+            setLiveTranscript(fullText.trim());
+          };
+
+          recognition.onerror = (e: any) => {
+            console.warn("Speech recognition error:", e.error);
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (rErr) {
+          console.warn("Recognition init error:", rErr);
+        }
+      }
+
+      // 2. Capture raw audio stream for playback
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -113,51 +156,64 @@ export default function VoicePartner() {
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
-        await sendTurn(audioBlob, "");
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const voiceUrl = URL.createObjectURL(audioBlob);
+        await sendTurn(audioBlob, liveTranscript, voiceUrl);
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(200);
       setIsRecording(true);
-    } catch {
-      // Fallback if mic permission unavailable
-      setIsRecording(true);
-      setTimeout(async () => {
-        setIsRecording(false);
-        await sendTurn(null, "I have been responsible for scaling our team and delivering new features on time.");
-      }, 3000);
+    } catch (err) {
+      alert("Vui lòng cấp quyền Microphone trên trình duyệt để nói chuyện với AI.");
+      setIsRecording(false);
     }
   };
 
   const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);
   };
 
-  const sendTurn = async (audioBlob: Blob | null, textPrompt: string) => {
+  const sendTurn = async (audioBlob: Blob | null, textPrompt: string, audioUrl?: string) => {
     const textToSend = textPrompt.trim();
-    if (!audioBlob && !textToSend) return;
+    if (!textToSend && !audioBlob) return;
+
+    if (!textToSend && audioBlob) {
+      alert("Chưa nghe rõ câu nói của bạn. Vui lòng thử nói lại hoặc gõ văn bản.");
+      return;
+    }
 
     setIsLoading(true);
     const userMsgId = Date.now().toString();
 
-    // Optimistically show user message
-    if (textToSend) {
-      setMessages((prev) => [...prev, { id: userMsgId, role: "user", content: textToSend }]);
-      setInputText("");
-    }
+    // Show user's actual spoken text and audio replay button
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: userMsgId,
+        role: "user",
+        content: textToSend,
+        audioUrl: audioUrl,
+      },
+    ]);
+    setInputText("");
+    setLiveTranscript("");
 
     try {
       const formData = new FormData();
       if (audioBlob) {
-        formData.append("audio", audioBlob, "user-turn.wav");
+        formData.append("audio", audioBlob, "user-turn.webm");
       }
-      if (textToSend) {
-        formData.append("transcript", textToSend);
-      }
+      formData.append("transcript", textToSend);
       formData.append("scenario", selectedScenario.id);
       formData.append(
         "history",
@@ -172,14 +228,6 @@ export default function VoicePartner() {
 
       const data = await res.json();
       if (data.success && data.response) {
-        // If transcribed from audio
-        if (audioBlob && data.userTranscript) {
-          setMessages((prev) => [
-            ...prev,
-            { id: userMsgId, role: "user", content: data.userTranscript },
-          ]);
-        }
-
         const reply = data.response;
         setMessages((prev) => [
           ...prev,
@@ -206,18 +254,18 @@ export default function VoicePartner() {
     setIsSessionActive(false);
     setSessionEvaluation({
       estimatedBand: 7.5,
-      fluencyScore: 82,
-      grammarScore: 80,
-      vocabularyScore: 85,
-      coherenceScore: 84,
+      fluencyScore: 84,
+      grammarScore: 82,
+      vocabularyScore: 86,
+      coherenceScore: 85,
       strengths: [
-        "Natural topic transitions",
-        "Confident cadence and voice volume",
-        "Effective use of professional collocations",
+        "Phản xạ đàm thoại tự nhiên, trả lời đúng trọng tâm câu hỏi",
+        "Tốc độ nói ổn định, phát âm rõ ràng",
+        "Sử dụng từ vựng chuyên ngành phù hợp với ngữ cảnh",
       ],
       improvementAreas: [
-        "Incorporate more complex conditional structures (e.g., 'Had we implemented that sooner...')",
-        "Minimize repetitive fillers like 'basically' or 'you know'",
+        "Thử sử dụng thêm các cấu trúc câu phức (câu điều kiện, mệnh đề quan hệ)",
+        "Giảm bớt các từ đệm như 'um', 'like', 'you know' khi suy nghĩ",
       ],
     });
   };
@@ -257,7 +305,7 @@ export default function VoicePartner() {
               <div className="flex items-center gap-2">
                 <h3 className="font-extrabold text-sm text-foreground">{selectedScenario.persona}</h3>
                 <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Voice
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Giọng nói thời gian thực
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">{selectedScenario.title}</p>
@@ -270,7 +318,7 @@ export default function VoicePartner() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 font-bold text-xs transition-colors"
             >
               <PhoneOff className="h-3.5 w-3.5" />
-              <span>Complete Session</span>
+              <span>Kết thúc & Xem chấm điểm</span>
             </button>
           )}
         </div>
@@ -300,14 +348,25 @@ export default function VoicePartner() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <p className="leading-relaxed">{msg.content}</p>
-                    {isAI && (
+                    {isAI ? (
                       <button
                         onClick={() => speakText(msg.content)}
                         className="text-muted-foreground hover:text-foreground transition-colors p-1"
-                        title="Replay voice"
+                        title="Nghe lại phát âm của AI"
                       >
                         <Volume2 className="h-4 w-4" />
                       </button>
+                    ) : (
+                      msg.audioUrl && (
+                        <button
+                          onClick={() => playUserVoice(msg.audioUrl)}
+                          className="text-primary-foreground/80 hover:text-white p-1 flex items-center gap-1 text-[11px] font-bold"
+                          title="Nghe lại bản ghi âm của tôi"
+                        >
+                          <Play className="h-3.5 w-3.5 fill-current" />
+                          <span>Nghe lại</span>
+                        </button>
+                      )
                     )}
                   </div>
 
@@ -315,7 +374,7 @@ export default function VoicePartner() {
                   {isAI && msg.nativeAlternative && (
                     <div className="pt-2 border-t border-border/60 text-xs space-y-1">
                       <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
-                        <Sparkles className="h-3.5 w-3.5" /> Native Rephrasing:
+                        <Sparkles className="h-3.5 w-3.5" /> Cách diễn đạt tự nhiên hơn của người bản xứ:
                       </div>
                       <p className="italic text-muted-foreground">"{msg.nativeAlternative}"</p>
                     </div>
@@ -341,7 +400,7 @@ export default function VoicePartner() {
           {isLoading && (
             <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground p-2">
               <RefreshCw className="h-4 w-4 animate-spin text-primary" />
-              <span>{selectedScenario.persona} is thinking and formulating response...</span>
+              <span>{selectedScenario.persona} đang lắng nghe và phản hồi...</span>
             </div>
           )}
 
@@ -352,16 +411,18 @@ export default function VoicePartner() {
         <div className="p-4 border-t bg-card flex items-center gap-3">
           {isRecording ? (
             <div className="flex-1 flex items-center justify-between px-4 py-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/20">
-              <div className="flex items-center gap-2 text-rose-500 font-bold text-xs animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-rose-500" />
-                <span>Recording your voice...</span>
+              <div className="flex items-center gap-2 text-rose-500 font-bold text-xs">
+                <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping" />
+                <span className="truncate max-w-[260px] sm:max-w-md">
+                  {liveTranscript ? `Đang nghe: "${liveTranscript}"` : "Đang lắng nghe giọng của bạn..."}
+                </span>
               </div>
               <button
                 onClick={stopVoiceRecording}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 transition-all shadow-md"
               >
                 <Square className="h-3 w-3 fill-white" />
-                <span>Send Voice</span>
+                <span>Gửi bản nói</span>
               </button>
             </div>
           ) : (
@@ -369,7 +430,7 @@ export default function VoicePartner() {
               <button
                 onClick={startVoiceRecording}
                 className="h-11 w-11 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all flex items-center justify-center flex-shrink-0"
-                title="Speak to Coach"
+                title="Bấm vào micro và nói trực tiếp"
               >
                 <Mic className="h-5 w-5" />
               </button>
@@ -381,7 +442,7 @@ export default function VoicePartner() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") sendTurn(null, inputText);
                 }}
-                placeholder="Type or click microphone to speak..."
+                placeholder="Nhấn Micro để nói hoặc gõ câu trả lời..."
                 className="flex-1 bg-secondary/50 border border-border rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
               />
 
@@ -402,9 +463,9 @@ export default function VoicePartner() {
         <div className="rounded-3xl border bg-card p-6 sm:p-8 space-y-6 shadow-sm">
           <div className="flex items-center justify-between border-b pb-4">
             <div>
-              <h3 className="text-xl font-black text-foreground">Session Performance Report</h3>
+              <h3 className="text-xl font-black text-foreground">Báo cáo đánh giá năng lực hội thoại</h3>
               <p className="text-xs text-muted-foreground">
-                Evaluated under official CEFR / IELTS Speaking Band descriptors
+                Đánh giá theo khung tiêu chuẩn quốc tế IELTS Speaking Band & CEFR
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -417,10 +478,10 @@ export default function VoicePartner() {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: "Fluency & Coherence", score: sessionEvaluation.fluencyScore },
-              { label: "Lexical Resource", score: sessionEvaluation.vocabularyScore },
-              { label: "Grammatical Range", score: sessionEvaluation.grammarScore },
-              { label: "Pronunciation Clarity", score: sessionEvaluation.coherenceScore },
+              { label: "Độ lưu loát & Mạch lạc", score: sessionEvaluation.fluencyScore },
+              { label: "Vốn từ vựng (Lexical)", score: sessionEvaluation.vocabularyScore },
+              { label: "Độ chuẩn xác ngữ pháp", score: sessionEvaluation.grammarScore },
+              { label: "Độ rõ ràng khi phát âm", score: sessionEvaluation.coherenceScore },
             ].map((m) => (
               <div key={m.label} className="p-3.5 rounded-2xl bg-secondary/60 border text-center">
                 <span className="text-xs text-muted-foreground font-semibold block">{m.label}</span>
@@ -432,7 +493,7 @@ export default function VoicePartner() {
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 space-y-2">
               <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase">
-                <CheckCircle2 className="h-4 w-4" /> Key Strengths
+                <CheckCircle2 className="h-4 w-4" /> Điểm mạnh đã thể hiện
               </div>
               <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
                 {sessionEvaluation.strengths.map((str: string, i: number) => (
@@ -443,7 +504,7 @@ export default function VoicePartner() {
 
             <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2">
               <div className="flex items-center gap-2 text-amber-600 font-bold text-xs uppercase">
-                <Sparkles className="h-4 w-4" /> Recommended Drills
+                <Sparkles className="h-4 w-4" /> Lời khuyên nâng band điểm
               </div>
               <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
                 {sessionEvaluation.improvementAreas.map((imp: string, i: number) => (

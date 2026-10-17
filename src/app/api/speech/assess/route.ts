@@ -8,6 +8,7 @@ export async function POST(req: NextRequest) {
     const audioFile = formData.get("audio") as Blob | null;
     const referenceText = (formData.get("referenceText") as string) || "";
     const targetIpa = (formData.get("targetIpa") as string) || undefined;
+    const spokenTranscript = (formData.get("spokenTranscript") as string) || "";
     const userId = (formData.get("userId") as string) || "guest-user";
     const exerciseId = (formData.get("exerciseId") as string) || undefined;
 
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Call Pronunciation Assessment Engine (Azure Speech SDK + Phoneme Analysis)
-    const result = await assessPronunciation(audioBuffer, referenceText, targetIpa);
+    const result = await assessPronunciation(audioBuffer, referenceText, targetIpa, spokenTranscript);
 
     // Save result to DB if user is registered
     if (userId && userId !== "guest-user") {

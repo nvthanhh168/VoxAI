@@ -23,10 +23,10 @@ export interface ConversationTurnResponse {
  * Transcribe recorded voice with OpenAI Whisper API
  */
 export async function transcribeAudioWithWhisper(audioBuffer: Buffer, fileName = "recording.wav"): Promise<string> {
-  if (!apiKey || apiKey === "sk-proj-your-openai-api-key") {
-    // Intelligent simulation fallback for preview
-    return "Could I get an iced caramel latte with oat milk, please?";
+  if (!apiKey || apiKey === "sk-proj-your-openai-api-key" || audioBuffer.length === 0) {
+    return "";
   }
+
   try {
     const file = await toFile(audioBuffer, fileName);
     const response = await openai.audio.transcriptions.create({
@@ -36,8 +36,8 @@ export async function transcribeAudioWithWhisper(audioBuffer: Buffer, fileName =
     });
     return response.text;
   } catch (error) {
-    console.warn("Whisper API error, using fallback transcript:", error);
-    return "Could I get an iced caramel latte with oat milk, please?";
+    console.warn("Whisper API error:", error);
+    return "";
   }
 }
 
