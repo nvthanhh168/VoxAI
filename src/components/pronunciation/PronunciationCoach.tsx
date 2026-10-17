@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Mic,
   Square,
@@ -8,16 +8,23 @@ import {
   RefreshCw,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
   Info,
   Play,
   RotateCcw,
   CheckCircle2,
   AlertCircle,
   Clock,
-  ToggleLeft,
-  ToggleRight,
+  Filter,
+  PlusCircle,
+  Layers,
+  Search,
+  Gauge,
+  BookOpen,
+  ArrowRight,
+  Headphones,
 } from "lucide-react";
-import { MOCK_PRONUNCIATION_DRILLS } from "@/lib/mock-data";
+import { MOCK_PRONUNCIATION_DRILLS, PronunciationDrill } from "@/lib/mock-data";
 import { getScoreColor } from "@/lib/utils";
 
 interface WordScore {
@@ -39,9 +46,53 @@ interface AssessmentData {
   spokenTextDetected?: string;
 }
 
+const CATEGORIES = [
+  { id: "ALL", label: "Tất cả chủ đề", icon: Layers },
+  { id: "DAILY", label: "Giao tiếp hàng ngày", icon: BookOpen },
+  { id: "TRAVEL", label: "Du lịch & Sân bay", icon: BookOpen },
+  { id: "BUSINESS", label: "Kinh doanh & Đàm phán", icon: BookOpen },
+  { id: "TECH", label: "Công nghệ & AI", icon: Sparkles },
+  { id: "INTERVIEW", label: "Phỏng vấn xin việc", icon: BookOpen },
+  { id: "IELTS_TOEIC", label: "IELTS & TOEIC Speaking", icon: Sparkles },
+  { id: "PHONETICS", label: "Luyện âm khó & Líu lưỡi", icon: Headphones },
+];
+
+const LEVELS = ["ALL", "A1", "A2", "B1", "B2", "C1", "C2"];
+
 export default function PronunciationCoach() {
+  const [selectedLevel, setSelectedLevel] = useState<string>("ALL");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
+  const [searchKeyword, setSearchKeyword] = useState<string>("");
+
+  // Custom sentence input mode
+  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
+  const [customSentence, setCustomSentence] = useState<string>("");
+  const [customDrill, setCustomDrill] = useState<PronunciationDrill | null>(null);
+
+  // Playback speed
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.9);
+
+  // Filtered drills
+  const filteredDrills = useMemo(() => {
+    return MOCK_PRONUNCIATION_DRILLS.filter((drill) => {
+      const matchLevel = selectedLevel === "ALL" || drill.level === selectedLevel;
+      const matchCat = selectedCategory === "ALL" || drill.category === selectedCategory;
+      const matchSearch =
+        !searchKeyword ||
+        drill.sentence.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+        drill.meaning.toLowerCase().includes(searchKeyword.toLowerCase());
+      return matchLevel && matchCat && matchSearch;
+    });
+  }, [selectedLevel, selectedCategory, searchKeyword]);
+
   const [drillIndex, setDrillIndex] = useState(0);
-  const currentDrill = MOCK_PRONUNCIATION_DRILLS[drillIndex];
+
+  // Active drill: either custom or from filtered list
+  const currentDrill: PronunciationDrill =
+    customDrill ||
+    (filteredDrills.length > 0
+      ? filteredDrills[Math.min(drillIndex, filteredDrills.length - 1)]
+      : MOCK_PRONUNCIATION_DRILLS[0]);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isAssessing, setIsAssessing] = useState(false);
@@ -54,6 +105,7 @@ export default function PronunciationCoach() {
   const [isSpeakingNow, setIsSpeakingNow] = useState<boolean>(false);
   const [autoStopOnSilence, setAutoStopOnSilence] = useState<boolean>(true);
   const [silenceSecondsLeft, setSilenceSecondsLeft] = useState<number>(1.5);
+  const [showSentencePicker, setShowSentencePicker] = useState<boolean>(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -64,13 +116,13 @@ export default function PronunciationCoach() {
   const vadIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Play target reference audio via SpeechSynthesis
-  const playNativeSample = (text: string) => {
+  // Play target reference audio via SpeechSynthesis with variable speed
+  const playNativeSample = (text: string, speedOverride?: number) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
-    utterance.rate = 0.88;
+    utterance.rate = speedOverride || playbackSpeed;
     window.speechSynthesis.speak(utterance);
   };
 
@@ -165,7 +217,7 @@ export default function PronunciationCoach() {
           const avg = sum / dataArray.length;
           setAudioLevel(Math.min(100, Math.round(avg * 2.2)));
 
-          const isVoicePresent = avg > 8; // threshold for voice
+          const isVoicePresent = avg > 8; // voice threshold
           setIsSpeakingNow(isVoicePresent);
 
           if (isVoicePresent) {
@@ -253,8 +305,7 @@ export default function PronunciationCoach() {
     }
   };
 
-  const nextSentence = () => {
-    setDrillIndex((prev) => (prev + 1) % MOCK_PRONUNCIATION_DRILLS.length);
+  const resetState = () => {
     setAssessment(null);
     setSelectedWord(null);
     setRecordedAudioUrl(null);
@@ -263,42 +314,273 @@ export default function PronunciationCoach() {
     liveTranscriptRef.current = "";
   };
 
+  const nextSentence = () => {
+    if (customDrill) {
+      setCustomDrill(null);
+    }
+    if (filteredDrills.length > 0) {
+      setDrillIndex((prev) => (prev + 1) % filteredDrills.length);
+    }
+    resetState();
+  };
+
+  const prevSentence = () => {
+    if (customDrill) {
+      setCustomDrill(null);
+    }
+    if (filteredDrills.length > 0) {
+      setDrillIndex((prev) => (prev - 1 + filteredDrills.length) % filteredDrills.length);
+    }
+    resetState();
+  };
+
+  const selectDrill = (idx: number) => {
+    setCustomDrill(null);
+    setDrillIndex(idx);
+    setShowSentencePicker(false);
+    resetState();
+  };
+
+  const handleApplyCustomSentence = () => {
+    if (!customSentence.trim()) return;
+    const newDrill: PronunciationDrill = {
+      id: "custom-" + Date.now(),
+      sentence: customSentence.trim(),
+      ipa: "/kəˈstəm ˈsɛntəns moʊd/",
+      meaning: "Câu tự chọn của bạn",
+      level: "B2",
+      category: "DAILY",
+      tips: "Luyện phát âm câu theo nhu cầu cá nhân. Chú ý ngữ điệu, nối âm và trọng âm câu.",
+    };
+    setCustomDrill(newDrill);
+    setIsCustomMode(false);
+    resetState();
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Category Tabs & Filters */}
+      <div className="space-y-3">
+        {/* Category Pills Bar */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {CATEGORIES.map((cat) => {
+            const isSelected = selectedCategory === cat.id && !customDrill;
+            const Icon = cat.icon;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => {
+                  setSelectedCategory(cat.id);
+                  setDrillIndex(0);
+                  setCustomDrill(null);
+                  resetState();
+                }}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all ${
+                  isSelected
+                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                    : "bg-card border border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{cat.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Level Filters & Search Row */}
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-muted-foreground mr-1">CEFR:</span>
+            {LEVELS.map((lvl) => (
+              <button
+                key={lvl}
+                onClick={() => {
+                  setSelectedLevel(lvl);
+                  setDrillIndex(0);
+                  setCustomDrill(null);
+                  resetState();
+                }}
+                className={`px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all ${
+                  selectedLevel === lvl
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-secondary/60 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                {lvl}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSentencePicker(!showSentencePicker)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border bg-secondary/50 text-xs font-bold text-foreground hover:bg-secondary"
+            >
+              <Search className="h-3.5 w-3.5" />
+              <span>Kho câu ({filteredDrills.length})</span>
+            </button>
+
+            <button
+              onClick={() => setIsCustomMode(!isCustomMode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                isCustomMode || customDrill
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-secondary/50 hover:bg-secondary text-foreground"
+              }`}
+            >
+              <PlusCircle className="h-3.5 w-3.5" />
+              <span>Tự nhập câu</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Sentence Quick Picker Modal / Dropdown */}
+      {showSentencePicker && (
+        <div className="p-4 rounded-3xl border bg-card shadow-lg space-y-3 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between pb-2 border-b">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Chọn câu để luyện ({filteredDrills.length} câu phù hợp)
+            </span>
+            <button
+              onClick={() => setShowSentencePicker(false)}
+              className="text-xs text-muted-foreground hover:text-foreground font-bold"
+            >
+              Đóng
+            </button>
+          </div>
+          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+            {filteredDrills.map((d, idx) => (
+              <button
+                key={d.id}
+                onClick={() => selectDrill(idx)}
+                className={`w-full text-left p-3 rounded-2xl border text-xs transition-all flex items-start justify-between gap-3 ${
+                  drillIndex === idx && !customDrill
+                    ? "bg-primary/10 border-primary text-foreground font-bold"
+                    : "hover:bg-secondary/60 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-1.5 py-0.5 rounded-md bg-secondary font-mono text-[10px] font-bold text-primary">
+                      {d.level}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground uppercase">{d.category}</span>
+                  </div>
+                  <p className="font-semibold text-foreground text-sm leading-snug">{d.sentence}</p>
+                  <p className="text-muted-foreground italic text-[11px] mt-0.5">{d.meaning}</p>
+                </div>
+                <ChevronRight className="h-4 w-4 mt-1 opacity-50 flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Sentence Input Drawer */}
+      {isCustomMode && (
+        <div className="p-5 rounded-3xl border bg-indigo-500/5 border-indigo-500/20 space-y-3 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4" /> Tự nhập bất kỳ câu tiếng Anh nào bạn muốn luyện tập
+            </span>
+            <button
+              onClick={() => setIsCustomMode(false)}
+              className="text-xs text-muted-foreground hover:text-foreground font-bold"
+            >
+              Hủy
+            </button>
+          </div>
+          <textarea
+            rows={2}
+            value={customSentence}
+            onChange={(e) => setCustomSentence(e.target.value)}
+            placeholder="Ví dụ: 'I'm thrilled to introduce our innovative product to international partners.'"
+            className="w-full rounded-2xl bg-background border p-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground">
+              Hệ thống sẽ đối chiếu âm tiết và chấm điểm giọng phát âm theo đúng câu bạn nhập.
+            </span>
+            <button
+              onClick={handleApplyCustomSentence}
+              disabled={!customSentence.trim()}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all disabled:opacity-50"
+            >
+              Bắt đầu luyện câu này
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Exercise Card */}
       <div className="relative overflow-hidden rounded-3xl border bg-card p-6 sm:p-8 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wide">
-              {currentDrill.level} Pronunciation Drill
+              {currentDrill.level} {customDrill ? "Custom Drill" : currentDrill.category}
             </span>
-            <span className="text-xs text-muted-foreground font-medium">
-              Bài {drillIndex + 1} / {MOCK_PRONUNCIATION_DRILLS.length}
-            </span>
+            {!customDrill && (
+              <span className="text-xs text-muted-foreground font-medium">
+                Câu {drillIndex + 1} / {filteredDrills.length}
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Speed selector */}
+            <div className="flex items-center gap-1 bg-secondary/60 p-1 rounded-xl border text-[11px] font-bold">
+              <span className="text-muted-foreground px-1">Tốc độ:</span>
+              {[0.75, 0.9, 1.0, 1.25].map((spd) => (
+                <button
+                  key={spd}
+                  onClick={() => setPlaybackSpeed(spd)}
+                  className={`px-1.5 py-0.5 rounded-lg transition-all ${
+                    playbackSpeed === spd
+                      ? "bg-primary text-primary-foreground font-extrabold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
             {/* Auto-Stop on silence toggle */}
             <button
               onClick={() => setAutoStopOnSilence(!autoStopOnSilence)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all ${
                 autoStopOnSilence
                   ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
                   : "bg-secondary text-muted-foreground"
               }`}
               title="Tự động dừng ghi âm sau 1.5s im lặng"
             >
-              <Clock className="h-3.5 w-3.5" />
-              <span>Tự ngắt khi im lặng: {autoStopOnSilence ? "BẬT" : "TẮT"}</span>
+              <Clock className="h-3 w-3" />
+              <span>Tự ngắt: {autoStopOnSilence ? "BẬT" : "TẮT"}</span>
             </button>
 
-            <button
-              onClick={nextSentence}
-              className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-xl border bg-secondary/50"
-            >
-              <span>Câu tiếp</span>
-              <ChevronRight className="h-4 w-4" />
-            </button>
+            {/* Prev / Next buttons */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={prevSentence}
+                disabled={filteredDrills.length <= 1}
+                className="h-8 w-8 rounded-xl border bg-secondary/50 hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+                title="Câu trước"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                onClick={nextSentence}
+                disabled={filteredDrills.length <= 1}
+                className="flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-foreground px-3 h-8 rounded-xl border bg-secondary/50 hover:bg-secondary"
+                title="Câu tiếp theo"
+              >
+                <span>Tiếp</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -311,7 +593,7 @@ export default function PronunciationCoach() {
             <button
               onClick={() => playNativeSample(currentDrill.sentence)}
               className="flex-shrink-0 h-11 w-11 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
-              title="Nghe phát âm chuẩn của người bản xứ"
+              title={`Nghe giọng đọc bản xứ chuẩn (Tốc độ ${playbackSpeed}x)`}
             >
               <Volume2 className="h-5 w-5" />
             </button>
@@ -467,12 +749,14 @@ export default function PronunciationCoach() {
                   <Play className="h-4 w-4 text-primary fill-primary" />
                   Nghe lại bản thu âm của bạn:
                 </span>
-                <button
-                  onClick={() => playNativeSample(currentDrill.sentence)}
-                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
-                >
-                  <Volume2 className="h-3.5 w-3.5" /> Nghe giọng mẫu bản xứ
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => playNativeSample(currentDrill.sentence)}
+                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                  >
+                    <Volume2 className="h-3.5 w-3.5" /> Nghe giọng mẫu ({playbackSpeed}x)
+                  </button>
+                </div>
               </div>
 
               <audio src={recordedAudioUrl} controls className="w-full h-10 rounded-xl" />

@@ -23,6 +23,8 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/practice", label: "Pronunciation Practice", icon: Mic, highlight: true },
   { href: "/speaking-partner", label: "AI Speaking Partner", icon: MessageSquare, badge: "Voice" },
+  { href: "/ielts-test", label: "Mock IELTS Speaking", icon: Award, badge: "Band 9" },
+  { href: "/toeic-test", label: "Mock TOEIC Speaking", icon: GraduationCap, badge: "ETS" },
   { href: "/vocabulary", label: "Vocabulary (SRS)", icon: BookOpen },
   { href: "/grammar-coach", label: "Grammar Coach", icon: Sparkles },
   { href: "/placement-test", label: "Placement Test", icon: GraduationCap },

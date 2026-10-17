@@ -34,6 +34,11 @@ const SCENARIOS = [
     persona: "Sarah (Hiring VP)",
     description: "Thảo luận về kỹ năng lãnh đạo, giải quyết mâu thuẫn và số liệu sản phẩm.",
     initialPrompt: "Welcome Alex! Thanks for coming in today. To start off, could you walk me through a major product initiative you spearheaded in your previous role?",
+    starters: [
+      "In my previous role, I led the redesign of our mobile onboarding flow.",
+      "One notable project was migrating our core checkout system to increase conversion by 25%.",
+      "I managed a cross-functional squad of 12 engineers and UX designers.",
+    ],
   },
   {
     id: "RESTAURANT_ORDERING",
@@ -41,6 +46,11 @@ const SCENARIOS = [
     persona: "Marco (Head Waiter)",
     description: "Gọi món, hỏi về thành phần món ăn và phong cách phục vụ lịch sự.",
     initialPrompt: "Good evening! Welcome to Le Bistro. Have you had a chance to look over the menu, or may I recommend our chef's daily specials?",
+    starters: [
+      "Good evening Marco! What do you recommend for the main course?",
+      "Could you tell me if the seafood risotto contains dairy?",
+      "We'd like to start with a bottle of sparkling water and the house red wine, please.",
+    ],
   },
   {
     id: "AIRPORT_TRAVEL",
@@ -48,6 +58,11 @@ const SCENARIOS = [
     persona: "Officer Davies (Customs)",
     description: "Giao tiếp tại cửa kiểm soát an ninh và khai báo hải quan nhập cảnh.",
     initialPrompt: "Passport and boarding pass, please. What is the primary purpose of your visit to London, and how long do you intend to stay?",
+    starters: [
+      "Here is my passport. I'm visiting London for an AI tech conference for five days.",
+      "I'm here for tourism and plan to stay for one week at the Central Hotel.",
+      "I have a return ticket booked for Sunday and travel insurance.",
+    ],
   },
   {
     id: "IELTS_SPEAKING_PART_2",
@@ -55,6 +70,59 @@ const SCENARIOS = [
     persona: "Examiner Wilson",
     description: "Nói về một mục tiêu hoặc trải nghiệm cá nhân liên tục trong 2 phút.",
     initialPrompt: "Now, I am going to give you a topic. I'd like you to talk about an ambition you have had for a long time. You have one minute to prepare, then start speaking.",
+    starters: [
+      "I'd like to talk about my ambition to develop an AI-powered education tool.",
+      "Ever since my university days, I have aspired to establish an edtech social enterprise.",
+      "This goal requires not only technical proficiency but also deep pedagogical insights.",
+    ],
+  },
+  {
+    id: "TECH_STANDUP",
+    title: "Họp Daily Scrum & Kiến trúc Tech",
+    persona: "David (Lead Architect)",
+    description: "Thảo luận tiến độ sprint, tối ưu hóa database và giải quyết blocker.",
+    initialPrompt: "Morning team! Let's do a quick sync on the microservices migration. Have we resolved the database connection pooling bottleneck we discussed yesterday?",
+    starters: [
+      "Morning David! Yes, we configured PgBouncer and our p99 query latency dropped by 45%.",
+      "I'm currently writing the unit tests for the distributed caching layer.",
+      "The only blocker is waiting for the security team to review our IAM roles.",
+    ],
+  },
+  {
+    id: "MEDICAL_CONSULT",
+    title: "Khám bệnh tại Bệnh viện Quốc tế",
+    persona: "Dr. Mitchell (General Practitioner)",
+    description: "Mô tả triệu chứng, tiền sử dị ứng và hỏi về liều lượng thuốc điều trị.",
+    initialPrompt: "Hello there, come on in and take a seat. What seems to be troubling you today, and how long have you been feeling this way?",
+    starters: [
+      "Good morning doctor. I've had a persistent fever and dry cough for the past three days.",
+      "I've also been feeling quite dizzy whenever I stand up quickly.",
+      "Are there any side effects associated with this medication?",
+    ],
+  },
+  {
+    id: "HOTEL_CHECKIN",
+    title: "Check-in Khách sạn 5 sao & Đổi phòng",
+    persona: "Elena (Front Desk Manager)",
+    description: "Nhận phòng, yêu cầu tầng cao view đẹp và hỏi các dịch vụ tiện ích.",
+    initialPrompt: "Good afternoon, welcome to The Grand Horizon! Do you have a reservation with us today, sir?",
+    starters: [
+      "Good afternoon! Yes, I have a reservation under the name Alexander Rivera.",
+      "Could I possibly get a quiet room on a high floor overlooking the city?",
+      "What time is breakfast served in the morning, and is the gym accessible 24/7?",
+    ],
+  },
+  {
+    id: "COFFEE_SHOP_CHAT",
+    title: "Giao lưu Kết bạn tại Quán Cà phê",
+    persona: "Emma (Friendly Local Friend)",
+    description: "Trò chuyện thân mật tự nhiên về sách, du lịch và thói quen cuộc sống.",
+    initialPrompt: "Hey! Mind if I share this table with you? It's pretty packed today. By the way, what book are you reading?",
+    starters: [
+      "Not at all, please have a seat! I'm reading a book about behavioral economics.",
+      "Sure, go right ahead! Is this your regular spot around here?",
+      "I love the quiet ambiance of this coffee shop. Have you tried their almond croissant?",
+    ],
   },
 ];
 
@@ -507,6 +575,25 @@ export default function VoicePartner() {
 
           <div ref={chatBottomRef} />
         </div>
+
+        {/* Quick Starters Row */}
+        {selectedScenario.starters && selectedScenario.starters.length > 0 && !isRecording && (
+          <div className="px-4 py-2 border-t bg-secondary/20 flex items-center gap-2 overflow-x-auto scrollbar-none">
+            <span className="text-[11px] font-bold text-muted-foreground whitespace-nowrap flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-amber-500" /> Gợi ý nhanh:
+            </span>
+            {selectedScenario.starters.map((starter, sIdx) => (
+              <button
+                key={sIdx}
+                onClick={() => setInputText(starter)}
+                className="px-2.5 py-1 rounded-xl bg-background border border-border text-[11px] text-foreground hover:bg-secondary whitespace-nowrap transition-colors"
+                title="Bấm để chọn câu này"
+              >
+                "{starter}"
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Input Bar */}
         <div className="p-4 border-t bg-card flex items-center gap-3">

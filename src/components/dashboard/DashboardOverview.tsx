@@ -166,6 +166,48 @@ export default function DashboardOverview() {
           ))}
         </div>
       </div>
+
+      {/* Certification Mock Tests & Skills Sprint */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-xl font-black text-foreground">Mock Speaking Test Center</h2>
+          <p className="text-xs text-muted-foreground">Standardized exam simulations evaluated by official criteria</p>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Link
+            href="/ielts-test"
+            className="group p-5 rounded-3xl border bg-gradient-to-br from-rose-500/5 via-card to-card hover:border-rose-500/40 hover:shadow-md transition-all flex items-center justify-between"
+          >
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                British Council / IDP Format
+              </span>
+              <h3 className="font-extrabold text-base text-foreground group-hover:text-rose-600 transition-colors">
+                Mock IELTS Speaking Exam
+              </h3>
+              <p className="text-xs text-muted-foreground">Parts 1, 2, and 3 with real 1-min cue card timer & band score</p>
+            </div>
+            <Award className="h-8 w-8 text-rose-500 flex-shrink-0 ml-3" />
+          </Link>
+
+          <Link
+            href="/toeic-test"
+            className="group p-5 rounded-3xl border bg-gradient-to-br from-blue-500/5 via-card to-card hover:border-blue-500/40 hover:shadow-md transition-all flex items-center justify-between"
+          >
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600">
+                ETS Format • 200 Points
+              </span>
+              <h3 className="font-extrabold text-base text-foreground group-hover:text-blue-600 transition-colors">
+                Mock TOEIC Speaking Exam
+              </h3>
+              <p className="text-xs text-muted-foreground">Read texts aloud, describe pictures, and express business opinions</p>
+            </div>
+            <Clock className="h-8 w-8 text-blue-500 flex-shrink-0 ml-3" />
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
