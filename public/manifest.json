@@ -1,0 +1,16 @@
+{
+  "name": "VoxAI - Elite AI English Learning SaaS",
+  "short_name": "VoxAI",
+  "description": "Master English pronunciation with Azure AI, Whisper STT, and Real-time Voice Partner",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#007BFF",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

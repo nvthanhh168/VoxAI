@@ -1,0 +1,396 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  STUDENT
+  TEACHER
+  PARENT
+  ADMIN
+}
+
+enum PlanType {
+  FREE
+  PREMIUM_MONTHLY
+  PREMIUM_YEARLY
+  ENTERPRISE_SCHOOL
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+}
+
+enum CefrLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+}
+
+enum ExerciseType {
+  PRONUNCIATION
+  SHADOWING
+  ROLEPLAY_SPEAKING
+  LISTENING_COMPREHENSION
+  GRAMMAR_CORRECTION
+  VOCABULARY_FLASHCARD
+  MOCK_IELTS
+  MOCK_TOEIC
+}
+
+enum ScenarioCategory {
+  JOB_INTERVIEW
+  RESTAURANT_ORDERING
+  AIRPORT_TRAVEL
+  BUSINESS_SALES_PITCH
+  CUSTOMER_SUPPORT
+  CASUAL_COFFEE_CHAT
+  IELTS_SPEAKING_PART_1
+  IELTS_SPEAKING_PART_2
+  IELTS_SPEAKING_PART_3
+  TOEIC_SPEAKING
+}
+
+model User {
+  id                   String           @id @default(cuid())
+  name                 String?
+  email                String?          @unique
+  emailVerified        DateTime?
+  passwordHash         String?
+  image                String?
+  role                 Role             @default(USER)
+  cefrLevel            CefrLevel        @default(A2)
+  xp                   Int              @default(0)
+  streakDays           Int              @default(1)
+  lastStreakDate       DateTime?
+  learningMinutesTotal Int              @default(0)
+  nativeLanguage       String           @default("vi")
+  targetGoal           String           @default("Conversational Fluency")
+  weeklyGoalMinutes    Int              @default(150)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  // Relationships
+  accounts             Account[]
+  sessions             Session[]
+  subscription         Subscription?
+  progress             UserProgress[]
+  pronunciationResults PronunciationResult[]
+  flashcards           Flashcard[]
+  speakingSessions     SpeakingSession[]
+  placementTests       PlacementTest[]
+  studyPlans           StudyPlan[]
+  achievements         UserAchievement[]
+  challenges           UserChallenge[]
+  voiceProfile         VoiceProfile?
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  planType             PlanType           @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Course {
+  id          String    @id @default(cuid())
+  title       String
+  slug        String    @unique
+  description String    @db.Text
+  targetLevel CefrLevel
+  category    String
+  thumbnail   String?
+  isPublished Boolean   @default(true)
+  orderIndex  Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  lessons Lesson[]
+}
+
+model Lesson {
+  id               String    @id @default(cuid())
+  courseId         String
+  title            String
+  description      String?   @db.Text
+  cefrLevel        CefrLevel
+  estimatedMinutes Int       @default(15)
+  orderIndex       Int       @default(1)
+  isFreePreview    Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  course    Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  exercises Exercise[]
+  progress  UserProgress[]
+}
+
+model Exercise {
+  id             String       @id @default(cuid())
+  lessonId       String
+  type           ExerciseType
+  orderIndex     Int          @default(1)
+  promptSentence String       @db.Text
+  targetIpa      String?
+  audioSampleUrl String?
+  translation    String?
+  tips           String?      @db.Text
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  lesson  Lesson                @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  results PronunciationResult[]
+}
+
+model PronunciationResult {
+  id                 String   @id @default(cuid())
+  userId             String
+  exerciseId         String?
+  targetSentence     String   @db.Text
+  transcribedText    String   @db.Text
+  accuracyScore      Float
+  fluencyScore       Float
+  completenessScore  Float
+  prosodyScore       Float
+  overallScore       Float
+  wordScores         Json // Detailed word-by-word scores and error tags
+  phonemeScores      Json? // Phoneme-level diagnostics
+  audioRecordingUrl  String?
+  aiCoachFeedback    String?  @db.Text
+  nativeAlternatives Json? // Native phrasing suggestions
+  createdAt          DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercise Exercise? @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model VocabularyItem {
+  id               String    @id @default(cuid())
+  word             String    @unique
+  ipa              String
+  partOfSpeech     String
+  definition       String    @db.Text
+  translation      String
+  cefrLevel        CefrLevel
+  exampleSentence  String    @db.Text
+  exampleAudioUrl  String?
+  collocations     Json?
+  synonyms         Json?
+  audioUrl         String?
+  createdAt        DateTime  @default(now())
+
+  flashcards Flashcard[]
+}
+
+model Flashcard {
+  id               String    @id @default(cuid())
+  userId           String
+  vocabId          String
+  // SuperMemo SM-2 Algorithm parameters
+  repetition       Int       @default(0)
+  intervalDays     Float     @default(1.0)
+  easeFactor       Float     @default(2.5)
+  lastReviewedAt   DateTime?
+  nextReviewAt     DateTime  @default(now())
+  consecutiveGood  Int       @default(0)
+  createdAt        DateTime  @default(now())
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item VocabularyItem @relation(fields: [vocabId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vocabId])
+  @@index([userId, nextReviewAt])
+}
+
+model SpeakingSession {
+  id                  String           @id @default(cuid())
+  userId              String
+  scenario            ScenarioCategory
+  title               String
+  aiPersonaName       String           @default("Coach Emma")
+  durationSeconds     Int              @default(0)
+  messages            Json // Array of { role: 'user' | 'assistant', content: string, audioUrl?: string, corrections?: string[] }
+  fluencyScore        Float?
+  grammarScore        Float?
+  vocabularyScore     Float?
+  coherenceScore      Float?
+  estimatedIeltsBand  Float?
+  feedbackSummary     String?          @db.Text
+  weaknesses          Json?
+  recommendedDrills   Json?
+  createdAt           DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model PlacementTest {
+  id                 String    @id @default(cuid())
+  userId             String
+  overallScore       Int
+  assessedLevel      CefrLevel
+  pronunciationScore Float
+  grammarScore       Float
+  vocabularyScore    Float
+  listeningScore     Float
+  speakingScore      Float
+  detailedReport     Json
+  recommendedRoadmap Json
+  completedAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StudyPlan {
+  id             String    @id @default(cuid())
+  userId         String
+  title          String
+  targetDate     DateTime?
+  dailyGoalMins  Int       @default(25)
+  weeklyMilestones Json
+  dailyChecklist   Json
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  lessonId    String
+  isCompleted Boolean  @default(false)
+  score       Int      @default(0)
+  timeSpent   Int      @default(0)
+  completedAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  title       String
+  description String
+  badgeIcon   String
+  xpReward    Int      @default(100)
+  category    String   @default("MILESTONE")
+  createdAt   DateTime @default(now())
+
+  users UserAchievement[]
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+}
+
+model Challenge {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  targetCount Int
+  xpReward    Int
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean  @default(true)
+
+  participants UserChallenge[]
+}
+
+model UserChallenge {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  progress    Int      @default(0)
+  completed   Boolean  @default(false)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+}
+
+model VoiceProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  pitchBaseline Float?
+  sampleAudioUrl String?
+  clonedVoiceId String?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
