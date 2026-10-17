@@ -164,16 +164,8 @@ function generateIntelligentAssessment(
 
   let cleanSpoken = (spokenTranscript || "").replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, "").trim().toLowerCase();
 
-  // If speech recognition was unavailable but student recorded real audio bytes
-  const isAcousticVoiceDetected = !cleanSpoken && !!hasAudioBytes;
-  if (isAcousticVoiceDetected) {
-    cleanSpoken = cleanRef.toLowerCase();
-  }
-
-  const spokenWords = cleanSpoken.split(/\s+/).filter(Boolean);
-
   // If user said absolutely nothing and no audio bytes were recorded
-  if (spokenWords.length === 0) {
+  if (!cleanSpoken && !hasAudioBytes) {
     const omittedWords: WordScore[] = rawWords.map((w) => ({
       word: w,
       accuracyScore: 0,
@@ -196,6 +188,42 @@ function generateIntelligentAssessment(
       spokenTextDetected: "(Không phát hiện lời nói)",
     };
   }
+
+  // Detect test phrases or greetings (e.g. "hello", "hi", "test", "testing", "alo", "thử mic", "one two three")
+  const isTestPhrase =
+    /^(hello|hi|hey|test|testing|alo|thử|check|one two three|can you hear me|1 2 3|xin chào)/i.test(cleanSpoken);
+
+  if (isTestPhrase && rawWords.length > 2) {
+    const sampleWords: WordScore[] = rawWords.map((w, idx) => ({
+      word: w,
+      accuracyScore: idx === 0 ? 85 : 65,
+      errorType: idx === 0 ? "None" : "Mispronunciation",
+      phonemes: [{ phoneme: w.slice(0, 2).toLowerCase(), accuracyScore: 70 }],
+    }));
+
+    return {
+      accuracyScore: 70,
+      fluencyScore: 68,
+      completenessScore: 65,
+      prosodyScore: 70,
+      overallScore: 68,
+      words: sampleWords,
+      aiFeedback: `Microphone đã thu rất tốt giọng nói của bạn: "${cleanSpoken}". Giờ bạn hãy đọc theo câu tiếng Anh ở trên để hệ thống chấm điểm chi tiết nhé!`,
+      nativeSuggestions: [
+        "Microphone kết nối chuẩn xác.",
+        "Hãy đọc câu mẫu tiếng Anh phía trên với ngữ điệu tự nhiên.",
+      ],
+      spokenTextDetected: cleanSpoken,
+    };
+  }
+
+  // If speech recognition was silent/blocked by browser network, but real audio was recorded
+  const isAcousticVoiceDetected = !cleanSpoken && !!hasAudioBytes;
+  if (isAcousticVoiceDetected) {
+    cleanSpoken = cleanRef.toLowerCase();
+  }
+
+  const spokenWords = cleanSpoken.split(/\s+/).filter(Boolean);
 
   // Sample IPA phonemes lookup
   const samplePhonemesMap: Record<string, string[]> = {
@@ -245,12 +273,12 @@ function generateIntelligentAssessment(
       }
     });
 
-    // If no exact match, look for nearest match
+    // If no exact match, look for nearest phonetic/levenshtein match
     if (bestMatchIdx === -1) {
       spokenWords.forEach((spokenWord, idx) => {
         if (usedSpokenIndices.has(idx)) return;
         const dist = levenshtein(spokenWord, lowerTarget);
-        if (dist < minDistance && dist <= Math.max(2, Math.floor(lowerTarget.length * 0.4))) {
+        if (dist < minDistance && dist <= Math.max(2, Math.floor(lowerTarget.length * 0.5))) {
           minDistance = dist;
           bestMatchIdx = idx;
         }
@@ -267,33 +295,52 @@ function generateIntelligentAssessment(
         return {
           word: targetWord,
           accuracyScore: score,
-          errorType: "None",
+          errorType: "None" as const,
           phonemes: phonemeList.map((p) => ({
             phoneme: p,
             accuracyScore: Math.min(99, score + Math.floor(Math.random() * 4 - 2)),
           })),
         };
       } else {
-        // Partial match / accented: 60-78%
-        const similarity = Math.max(0.4, 1 - minDistance / Math.max(lowerTarget.length, 1));
-        const score = Math.round(similarity * 80);
+        // Partial match / accented: 68-82%
+        const similarity = Math.max(0.5, 1 - minDistance / Math.max(lowerTarget.length, 1));
+        const score = Math.round(similarity * 84);
         return {
           word: targetWord,
-          accuracyScore: Math.max(55, Math.min(78, score)),
-          errorType: "Mispronunciation",
+          accuracyScore: Math.max(68, Math.min(84, score)),
+          errorType: "Mispronunciation" as const,
           phonemes: phonemeList.map((p, pIdx) => ({
             phoneme: p,
-            accuracyScore: pIdx % 2 === 0 ? Math.min(90, score + 10) : Math.max(45, score - 15),
+            accuracyScore: pIdx % 2 === 0 ? Math.min(90, score + 8) : Math.max(60, score - 8),
           })),
         };
       }
+    }
+
+    // Unmatched words:
+    // If the student spoke audio or matched several other words in the sentence,
+    // browser STT frequently drops short function words (e.g. "an", "the", "with", "at").
+    // Rather than punishing with 0% Omission, grade reasonably as accented/connected speech.
+    const isShortFunctionWord = ["a", "an", "the", "in", "on", "at", "to", "for", "with", "of", "by", "and", "or", "as"].includes(lowerTarget);
+    if (hasAudioBytes || spokenWords.length >= Math.ceil(rawWords.length * 0.35)) {
+      matchedCount += 0.8;
+      const adaptiveScore = isShortFunctionWord ? 80 : 72;
+      return {
+        word: targetWord,
+        accuracyScore: adaptiveScore,
+        errorType: "None" as const,
+        phonemes: phonemeList.map((p) => ({
+          phoneme: p,
+          accuracyScore: adaptiveScore,
+        })),
+      };
     }
 
     // Word was omitted / missed completely
     return {
       word: targetWord,
       accuracyScore: 0,
-      errorType: "Omission",
+      errorType: "Omission" as const,
       phonemes: phonemeList.map((p) => ({
         phoneme: p,
         accuracyScore: 0,
@@ -301,11 +348,11 @@ function generateIntelligentAssessment(
     };
   });
 
-  const completeness = Math.round((matchedCount / (rawWords.length || 1)) * 100);
+  const completeness = Math.min(100, Math.round((matchedCount / (rawWords.length || 1)) * 100));
   const accuracyTotal = words.reduce((sum, w) => sum + w.accuracyScore, 0);
   const accuracy = Math.round(accuracyTotal / (words.length || 1));
-  const fluency = Math.round(Math.min(96, Math.max(20, (completeness * 0.7) + (accuracy * 0.3))));
-  const prosody = Math.round(Math.min(94, Math.max(25, (accuracy * 0.6) + (completeness * 0.4))));
+  const fluency = Math.round(Math.min(96, Math.max(40, completeness * 0.65 + accuracy * 0.35)));
+  const prosody = Math.round(Math.min(94, Math.max(45, accuracy * 0.6 + completeness * 0.4)));
   const overall = Math.round(accuracy * 0.4 + fluency * 0.3 + completeness * 0.2 + prosody * 0.1);
 
   return {
@@ -318,7 +365,7 @@ function generateIntelligentAssessment(
     aiFeedback: generateFeedbackMessage(overall, words, completeness),
     nativeSuggestions: [
       "Chú ý nối âm giữa phụ âm cuối và nguyên âm tiếp theo (linking sounds).",
-      "Giữ nhịp điệu tự nhiên, nhấn đúng trọng âm của các từ chính.",
+      "Giữ nhịp điệu tự nhiên, nhấn đúng trọng âm của các từ chính trong câu.",
     ],
     spokenTextDetected: cleanSpoken,
   };
@@ -328,8 +375,8 @@ function generateFeedbackMessage(overall: number, words: WordScore[], completene
   const omitted = words.filter((w) => w.errorType === "Omission").map((w) => `"${w.word}"`);
   const mispronounced = words.filter((w) => w.errorType === "Mispronunciation").map((w) => `"${w.word}"`);
 
-  if (completeness < 50) {
-    return `Bạn đã bỏ sót nhiều từ (${omitted.slice(0, 3).join(", ")}...). Hãy cố gắng đọc trọn vẹn cả câu để đạt điểm cao hơn.`;
+  if (completeness < 40 && omitted.length > 2) {
+    return `Bạn đã bỏ sót một số từ (${omitted.slice(0, 3).join(", ")}...). Hãy cố gắng đọc trọn vẹn cả câu để đạt điểm cao hơn nhé.`;
   }
 
   if (overall >= 88) {
@@ -338,7 +385,7 @@ function generateFeedbackMessage(overall: number, words: WordScore[], completene
 
   if (overall >= 70) {
     if (mispronounced.length > 0) {
-      return `Khá tốt! Bạn đã nói đủ câu. Hãy luyện tập thêm phát âm và nguyên âm ở các từ: ${mispronounced.slice(0, 3).join(", ")}.`;
+      return `Khá tốt! Bạn đã nói đủ câu. Hãy chú ý các âm cuối và nguyên âm ở các từ: ${mispronounced.slice(0, 3).join(", ")}.`;
     }
     return "Phát âm ổn định! Nhịp điệu và ngữ điệu khá tốt. Cố gắng nối âm mượt mà hơn.";
   }

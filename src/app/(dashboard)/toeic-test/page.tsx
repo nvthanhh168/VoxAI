@@ -94,6 +94,7 @@ export default function MockTOEICTestPage() {
   const timerRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
 
   const playAudio = (text: string) => {
     playNeuralVoice(text, { rate: 0.95, pitch: 1.0 });
@@ -122,6 +123,7 @@ export default function MockTOEICTestPage() {
       setIsPrepping(false);
       setLiveTranscript("");
       setSpeakSecondsLeft(q.speakSeconds);
+      isListeningRef.current = true;
 
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -131,12 +133,20 @@ export default function MockTOEICTestPage() {
           rec.lang = "en-US";
           rec.continuous = true;
           rec.interimResults = true;
+          rec.maxAlternatives = 3;
           rec.onresult = (e: any) => {
             let full = "";
             for (let i = 0; i < e.results.length; i++) {
               full += e.results[i][0].transcript + " ";
             }
             setLiveTranscript(full.trim());
+          };
+          rec.onend = () => {
+            if (isListeningRef.current) {
+              try {
+                rec.start();
+              } catch {}
+            }
           };
           rec.start();
           recognitionRef.current = rec;
@@ -165,6 +175,7 @@ export default function MockTOEICTestPage() {
   };
 
   const stopSpeaking = () => {
+    isListeningRef.current = false;
     if (timerRef.current) clearInterval(timerRef.current);
     if (recognitionRef.current) {
       try {

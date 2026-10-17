@@ -76,6 +76,7 @@ export default function MockIELTSTestPage() {
   const timerRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
 
   const speakExaminerPrompt = (text: string) => {
     playNeuralVoice(text, { rate: 0.95, pitch: 1.0, voiceGender: "male" });
@@ -105,8 +106,9 @@ export default function MockIELTSTestPage() {
       setIsPrepping(false);
       setLiveTranscript("");
       setSpeakSecondsElapsed(0);
+      isListeningRef.current = true;
 
-      // Web Speech
+      // Web Speech with auto-recovery
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -115,12 +117,20 @@ export default function MockIELTSTestPage() {
           rec.lang = "en-US";
           rec.continuous = true;
           rec.interimResults = true;
+          rec.maxAlternatives = 3;
           rec.onresult = (e: any) => {
             let full = "";
             for (let i = 0; i < e.results.length; i++) {
               full += e.results[i][0].transcript + " ";
             }
             setLiveTranscript(full.trim());
+          };
+          rec.onend = () => {
+            if (isListeningRef.current) {
+              try {
+                rec.start();
+              } catch {}
+            }
           };
           rec.start();
           recognitionRef.current = rec;
@@ -142,6 +152,7 @@ export default function MockIELTSTestPage() {
   };
 
   const stopSpeaking = () => {
+    isListeningRef.current = false;
     if (timerRef.current) clearInterval(timerRef.current);
     if (recognitionRef.current) {
       try {

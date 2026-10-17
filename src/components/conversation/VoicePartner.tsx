@@ -148,6 +148,7 @@ export default function VoicePartner() {
   const [sessionEvaluation, setSessionEvaluation] = useState<any>(null);
   const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
 
+  const isListeningRef = useRef<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
@@ -242,11 +243,12 @@ export default function VoicePartner() {
       setLiveTranscript("");
       liveTranscriptRef.current = "";
       hasSpokenRef.current = false;
+      isListeningRef.current = true;
       lastSoundTimestampRef.current = Date.now();
-      setSilenceSecondsLeft(1.6);
+      setSilenceSecondsLeft(2.0);
       setIsSpeakingNow(false);
 
-      // 1. Web Speech Recognition in browser
+      // 1. Web Speech Recognition in browser with resilient auto-recovery
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -256,6 +258,7 @@ export default function VoicePartner() {
           recognition.lang = "en-US";
           recognition.continuous = true;
           recognition.interimResults = true;
+          recognition.maxAlternatives = 3;
 
           recognition.onresult = (event: any) => {
             let fullText = "";
@@ -272,7 +275,16 @@ export default function VoicePartner() {
           };
 
           recognition.onerror = (e: any) => {
-            console.warn("Speech recognition error:", e.error);
+            console.warn("Speech recognition notice:", e.error);
+          };
+
+          recognition.onend = () => {
+            // Auto-restart if user has not explicitly clicked stop
+            if (isListeningRef.current) {
+              try {
+                recognition.start();
+              } catch {}
+            }
           };
 
           recognition.start();
@@ -313,7 +325,7 @@ export default function VoicePartner() {
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      // 3. AudioContext VAD for silence auto-stop
+      // 3. AudioContext VAD for silence auto-stop with sensitive threshold
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         const audioCtx = new AudioCtx();
@@ -334,20 +346,20 @@ export default function VoicePartner() {
           const avg = sum / dataArray.length;
           setAudioLevel(Math.min(100, Math.round(avg * 2.2)));
 
-          const isVoicePresent = avg > 8;
+          const isVoicePresent = avg > 2.5; // lowered sensitive threshold
           setIsSpeakingNow(isVoicePresent);
 
           if (isVoicePresent) {
             hasSpokenRef.current = true;
             lastSoundTimestampRef.current = Date.now();
-            setSilenceSecondsLeft(1.6);
+            setSilenceSecondsLeft(2.0);
           } else if (hasSpokenRef.current && autoStopOnSilence) {
             const silentMs = Date.now() - lastSoundTimestampRef.current;
-            const remaining = Math.max(0, (1600 - silentMs) / 1000);
+            const remaining = Math.max(0, (2000 - silentMs) / 1000);
             setSilenceSecondsLeft(parseFloat(remaining.toFixed(1)));
 
-            // If silence >= 1.6s, auto stop!
-            if (silentMs >= 1600) {
+            // If silence >= 2.0s, auto stop!
+            if (silentMs >= 2000) {
               console.log("VAD: Silence detected in conversation, auto-submitting...");
               clearInterval(vadIntervalRef.current);
               stopVoiceRecording();
@@ -367,6 +379,7 @@ export default function VoicePartner() {
   };
 
   const stopVoiceRecording = () => {
+    isListeningRef.current = false;
     if (vadIntervalRef.current) {
       clearInterval(vadIntervalRef.current);
       vadIntervalRef.current = null;
@@ -396,9 +409,8 @@ export default function VoicePartner() {
     let textToSend = (textPrompt || liveTranscriptRef.current).trim();
 
     // If text was empty but user spoke into mic or audio was recorded
-    if (!textToSend && (hasSpokenRef.current || (audioBlob ? audioBlob.size > 500 : false))) {
-      const starters = selectedScenario.starters;
-      textToSend = starters && starters.length > 0 ? starters[0] : "I would like to share my perspective on this.";
+    if (!textToSend && (hasSpokenRef.current || (audioBlob ? audioBlob.size > 100 : false))) {
+      textToSend = "Hello! I am ready to practice. What should we discuss next?";
     }
 
     if (!textToSend && !audioBlob) return;

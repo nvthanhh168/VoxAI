@@ -110,6 +110,7 @@ export default function PronunciationCoach() {
   const [silenceSecondsLeft, setSilenceSecondsLeft] = useState<number>(1.5);
   const [showSentencePicker, setShowSentencePicker] = useState<boolean>(false);
 
+  const isListeningRef = useRef<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
@@ -196,14 +197,15 @@ export default function PronunciationCoach() {
       setLiveTranscript("");
       liveTranscriptRef.current = "";
       hasSpokenRef.current = false;
+      isListeningRef.current = true;
       lastSoundTimestampRef.current = Date.now();
       setRecordedAudioUrl(null);
       setAudioLevel(0);
       setIsSpeakingNow(false);
-      setSilenceSecondsLeft(1.5);
+      setSilenceSecondsLeft(2.0);
       audioChunksRef.current = [];
 
-      // 1. Initialize Web Speech Recognition
+      // 1. Initialize Web Speech Recognition with resilient keep-alive
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -213,6 +215,7 @@ export default function PronunciationCoach() {
           recognition.lang = "en-US";
           recognition.continuous = true;
           recognition.interimResults = true;
+          recognition.maxAlternatives = 3;
 
           recognition.onresult = (event: any) => {
             let fullTranscript = "";
@@ -230,6 +233,16 @@ export default function PronunciationCoach() {
 
           recognition.onerror = (e: any) => {
             console.warn("SpeechRecognition notice:", e.error);
+            // Non-fatal errors like 'no-speech' should not abort recording
+          };
+
+          recognition.onend = () => {
+            // Auto-restart if user is still actively recording
+            if (isListeningRef.current) {
+              try {
+                recognition.start();
+              } catch {}
+            }
           };
 
           recognition.start();
@@ -281,7 +294,7 @@ export default function PronunciationCoach() {
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      // 3. AudioContext VAD (Voice Activity Detection) for silence auto-stop
+      // 3. AudioContext VAD (Voice Activity Detection) with sensitive baseline
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         const audioCtx = new AudioCtx();
@@ -302,21 +315,21 @@ export default function PronunciationCoach() {
           const avg = sum / dataArray.length;
           setAudioLevel(Math.min(100, Math.round(avg * 2.2)));
 
-          const isVoicePresent = avg > 8; // voice threshold
+          const isVoicePresent = avg > 2.5; // lowered sensitive threshold for laptop/phone mics
           setIsSpeakingNow(isVoicePresent);
 
           if (isVoicePresent) {
             hasSpokenRef.current = true;
             lastSoundTimestampRef.current = Date.now();
-            setSilenceSecondsLeft(1.5);
+            setSilenceSecondsLeft(2.0);
           } else if (hasSpokenRef.current && autoStopOnSilence) {
             const silentMs = Date.now() - lastSoundTimestampRef.current;
-            const remaining = Math.max(0, (1500 - silentMs) / 1000);
+            const remaining = Math.max(0, (2000 - silentMs) / 1000);
             setSilenceSecondsLeft(parseFloat(remaining.toFixed(1)));
 
-            // If user has spoken, and silence lasts >= 1.5s, auto-stop!
-            if (silentMs >= 1500) {
-              console.log("VAD: Silence detected for 1.5s, auto-stopping recording...");
+            // If user has spoken, and silence lasts >= 2.0s, auto-stop!
+            if (silentMs >= 2000) {
+              console.log("VAD: Natural speech pause detected for 2.0s, auto-stopping recording...");
               clearInterval(vadIntervalRef.current);
               stopRecording();
             }
@@ -336,6 +349,7 @@ export default function PronunciationCoach() {
   };
 
   const stopRecording = () => {
+    isListeningRef.current = false;
     if (vadIntervalRef.current) {
       clearInterval(vadIntervalRef.current);
       vadIntervalRef.current = null;
@@ -370,11 +384,11 @@ export default function PronunciationCoach() {
       }
 
       const rawTranscript = (finalTranscript || liveTranscriptRef.current || "").trim();
-      const userDidSpeak = hasSpokenRef.current || rawTranscript.length > 0 || (blob ? blob.size > 500 : false);
+      const userDidSpeak = hasSpokenRef.current || rawTranscript.length > 0 || (blob ? blob.size > 100 : false);
 
       formData.append("referenceText", currentDrill.sentence);
       formData.append("targetIpa", currentDrill.ipa);
-      formData.append("spokenTranscript", rawTranscript || (userDidSpeak ? currentDrill.sentence : ""));
+      formData.append("spokenTranscript", rawTranscript);
       formData.append("hasSpoken", String(userDidSpeak));
       formData.append("userId", "demo-user");
 
