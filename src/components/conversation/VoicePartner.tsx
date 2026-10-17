@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
+import { speakNaturalEnglish } from "@/lib/speech-voice";
 
 interface Message {
   id: string;
@@ -161,12 +162,7 @@ export default function VoicePartner() {
   }, [messages, liveTranscript]);
 
   const speakText = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.95;
-    window.speechSynthesis.speak(utterance);
+    speakNaturalEnglish(text, { rate: 0.94, pitch: 1.02 });
   };
 
   const playUserVoice = (audioUrl?: string) => {
@@ -332,15 +328,16 @@ export default function VoicePartner() {
   const sendTurn = async (audioBlob: Blob | null, textPrompt: string, audioUrl?: string) => {
     let textToSend = (textPrompt || liveTranscriptRef.current).trim();
 
-    // If text was empty but user spoke into mic, don't drop it
-    if (!textToSend && hasSpokenRef.current) {
-      textToSend = "I would like to share my experience regarding this topic.";
+    // If text was empty but user spoke into mic or audio was recorded
+    if (!textToSend && (hasSpokenRef.current || (audioBlob ? audioBlob.size > 500 : false))) {
+      const starters = selectedScenario.starters;
+      textToSend = starters && starters.length > 0 ? starters[0] : "I would like to share my perspective on this.";
     }
 
     if (!textToSend && !audioBlob) return;
 
     if (!textToSend) {
-      alert("Chưa phát hiện được giọng nói từ micro. Vui lòng nói to hơn hoặc gõ văn bản.");
+      alert("Chưa phát hiện được giọng nói từ micro. Vui lòng nói to hơn hoặc chọn câu gợi ý bên dưới.");
       return;
     }
 

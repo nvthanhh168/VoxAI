@@ -71,7 +71,7 @@ export async function assessPronunciation(
   }
 
   // Real-time responsive speech analysis based on what the student actually spoke
-  const hasAudioBytes = audioBuffer && audioBuffer.length > 1500;
+  const hasAudioBytes = (audioBuffer && audioBuffer.length > 200) || Boolean(spokenTranscript);
   return generateIntelligentAssessment(referenceText, targetIpa, spokenTranscript, hasAudioBytes);
 }
 

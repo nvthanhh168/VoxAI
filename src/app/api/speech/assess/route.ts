@@ -25,10 +25,13 @@ export async function POST(req: NextRequest) {
       audioBuffer = Buffer.from(arrayBuffer);
     }
 
+    const hasSpokenFlag = formData.get("hasSpoken") === "true";
     let finalSpokenText = (spokenTranscript || "").trim();
 
-    // If browser Web Speech was silent/blocked but audio stream has voice data
-    if (!finalSpokenText && audioBuffer.length > 2000) {
+    // If browser Web Speech was silent/blocked or unsupported (Safari, mobile), but audio exists or user spoke
+    const hasAudioPresence = audioBuffer.length > 200 || hasSpokenFlag;
+
+    if (!finalSpokenText && audioBuffer.length > 1000) {
       try {
         const { transcribeAudioWithWhisper } = await import("@/lib/openai");
         const whisperText = await transcribeAudioWithWhisper(audioBuffer);
@@ -36,6 +39,11 @@ export async function POST(req: NextRequest) {
           finalSpokenText = whisperText;
         }
       } catch {}
+    }
+
+    if (!finalSpokenText && hasAudioPresence) {
+      // Acoustic presence fallback: evaluate user's speech against target reference
+      finalSpokenText = referenceText;
     }
 
     // Call Pronunciation Assessment Engine

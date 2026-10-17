@@ -18,30 +18,26 @@ import {
   BookmarkCheck,
   X,
   Gauge,
+  Loader2,
 } from "lucide-react";
 import { TECH_ARTICLES, TECH_DICTIONARY, NewsArticle, WordDefinition } from "@/lib/news-data";
+import { speakNaturalEnglish } from "@/lib/speech-voice";
 
 export default function TechNewsReader() {
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle>(TECH_ARTICLES[0]);
   const [isPlayingFullArticle, setIsPlayingFullArticle] = useState(false);
   const [readingSpeed, setReadingSpeed] = useState<number>(0.92);
   const [selectedWordData, setSelectedWordData] = useState<WordDefinition | null>(null);
+  const [isLoadingWord, setIsLoadingWord] = useState(false);
   const [savedToSRS, setSavedToSRS] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  // Play pronunciation for an individual word
+  // Play pronunciation for an individual word using natural neural native voice
   const speakWord = (word: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(word);
-    utt.lang = "en-US";
-    utt.rate = 0.88;
-    window.speechSynthesis.speak(utt);
+    speakNaturalEnglish(word, { rate: 0.88, pitch: 1.02 });
   };
 
-  // Full article narration
+  // Full article narration with expressive natural voice
   const togglePlayArticle = () => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
@@ -51,50 +47,67 @@ export default function TechNewsReader() {
       return;
     }
 
-    window.speechSynthesis.cancel();
     const fullText = `${selectedArticle.title}. ${selectedArticle.paragraphs.join(" ")}`;
-    const utt = new SpeechSynthesisUtterance(fullText);
-    utt.lang = "en-US";
-    utt.rate = readingSpeed;
-
-    utt.onend = () => {
-      setIsPlayingFullArticle(false);
-    };
-
-    utt.onerror = () => {
-      setIsPlayingFullArticle(false);
-    };
-
-    speechUtteranceRef.current = utt;
-    window.speechSynthesis.speak(utt);
+    speakNaturalEnglish(fullText, {
+      rate: readingSpeed,
+      pitch: 1.0,
+      onEnd: () => setIsPlayingFullArticle(false),
+      onError: () => setIsPlayingFullArticle(false),
+    });
     setIsPlayingFullArticle(true);
   };
 
-  // Click on any word in the article
-  const handleWordClick = (rawWord: string) => {
+  // Click on any word in the article: instant lookup & translation
+  const handleWordClick = async (rawWord: string) => {
     // Clean punctuation
     const clean = rawWord.toLowerCase().replace(/[^a-z0-9'-]/g, "").trim();
     if (!clean || clean.length < 2) return;
 
-    // Check dictionary
-    let def = TECH_DICTIONARY[clean];
-
-    // Fallback dictionary heuristic for non-specialized words
-    if (!def) {
-      def = {
-        word: clean,
-        ipa: `/${clean}/`,
-        partOfSpeech: "vocabulary",
-        vietnameseMeaning: `Từ vựng tiếng Anh trong bài báo công nghệ`,
-        englishDefinition: `Contextual English word used in the technology news report.`,
-        collocations: [`use ${clean}`, `understand ${clean}`],
-        exampleInNews: `This term is highlighted in the current article.`,
-      };
+    // Check fast local dictionary first
+    if (TECH_DICTIONARY[clean]) {
+      setSelectedWordData(TECH_DICTIONARY[clean]);
+      setSavedToSRS(false);
+      speakWord(clean);
+      return;
     }
 
-    setSelectedWordData(def);
-    setSavedToSRS(false);
-    speakWord(clean);
+    // Call translation & definition lookup API for any other word
+    setIsLoadingWord(true);
+    setSelectedWordData({
+      word: clean,
+      ipa: `/${clean}/`,
+      partOfSpeech: "tra từ",
+      vietnameseMeaning: "Đang tra nghĩa tiếng Việt...",
+      englishDefinition: "Looking up contextual definition...",
+      collocations: [],
+      exampleInNews: "",
+    });
+
+    try {
+      speakWord(clean);
+      const res = await fetch("/api/dict/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: clean }),
+      });
+      const data = await res.json();
+      if (data?.data) {
+        setSelectedWordData(data.data);
+      }
+    } catch {
+      setSelectedWordData({
+        word: clean,
+        ipa: `/${clean}/`,
+        partOfSpeech: "từ vựng",
+        vietnameseMeaning: `Nghĩa của từ: "${clean}"`,
+        englishDefinition: `Vocabulary item in the article.`,
+        collocations: [`learn ${clean}`],
+        exampleInNews: "",
+      });
+    } finally {
+      setIsLoadingWord(false);
+      setSavedToSRS(false);
+    }
   };
 
   const handleSaveToSRS = async () => {
@@ -122,7 +135,7 @@ export default function TechNewsReader() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
       {/* Top Banner */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 p-6 sm:p-8 text-white shadow-xl shadow-teal-500/15">
         <div className="relative z-10 space-y-2">
@@ -133,14 +146,14 @@ export default function TechNewsReader() {
             Đọc Báo Công Nghệ Hàng Ngày & Tra Từ Tức Thì
           </h1>
           <p className="text-xs sm:text-sm text-teal-100 font-medium">
-            Cập nhật tin tức AI, chip bán dẫn, điện toán lượng tử. Chạm vào <strong>bất kỳ từ nào</strong> để tra nghĩa tiếng Việt, nghe phát âm và lưu vào Flashcard SRS ôn tập.
+            Cập nhật tin tức AI, chip bán dẫn, điện toán lượng tử. Chạm vào <strong>bất kỳ từ nào</strong> để dịch ra nghĩa tiếng Việt, nghe phát âm giọng người bản xứ và lưu vào Flashcard SRS.
           </p>
         </div>
       </div>
 
       {/* Article Selector & Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none w-full sm:w-auto">
           {filteredArticles.map((art) => (
             <button
               key={art.id}
@@ -163,20 +176,20 @@ export default function TechNewsReader() {
           ))}
         </div>
 
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-muted-foreground" />
           <input
             type="text"
             placeholder="Tìm chủ đề bài báo..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 pr-3 py-1.5 rounded-xl bg-secondary/50 border text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
+            className="w-full sm:w-48 pl-8 pr-3 py-1.5 rounded-xl bg-secondary/50 border text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
           />
         </div>
       </div>
 
       {/* Main Article Container */}
-      <div className="rounded-3xl border bg-card p-6 sm:p-8 space-y-6 shadow-sm">
+      <div className="rounded-3xl border bg-card p-5 sm:p-8 space-y-6 shadow-sm">
         {/* Article Meta Header */}
         <div className="space-y-3 border-b pb-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -196,10 +209,10 @@ export default function TechNewsReader() {
             </span>
           </div>
 
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight leading-snug">
+          <h2 className="text-xl sm:text-3xl font-extrabold text-foreground tracking-tight leading-snug">
             {selectedArticle.title}
           </h2>
-          <p className="text-sm text-muted-foreground font-medium leading-relaxed">
+          <p className="text-xs sm:text-sm text-muted-foreground font-medium leading-relaxed">
             {selectedArticle.subtitle}
           </p>
           <p className="text-xs font-semibold text-primary">{selectedArticle.author}</p>
@@ -224,14 +237,14 @@ export default function TechNewsReader() {
               ) : (
                 <>
                   <Play className="h-4 w-4 fill-white" />
-                  <span>Nghe phát thanh viên đọc toàn bài</span>
+                  <span>Nghe AI phát thanh viên đọc toàn bài</span>
                 </>
               )}
             </button>
 
             {isPlayingFullArticle && (
               <span className="text-xs font-bold text-emerald-600 animate-pulse flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Đang phát audio tiếng Anh...
+                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Đang phát audio tiếng Anh biểu cảm...
               </span>
             )}
           </div>
@@ -258,7 +271,7 @@ export default function TechNewsReader() {
         <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200">
           <Sparkles className="h-4 w-4 text-amber-600 flex-shrink-0" />
           <span>
-            <strong>Mẹo thông minh:</strong> Hãy bấm/chạm trực tiếp vào <strong>bất kỳ từ tiếng Anh nào</strong> trong bài viết dưới đây để tra nghĩa tiếng Việt, nghe phát âm chuẩn và lưu vào bộ Flashcard.
+            <strong>Chạm/Click vào bất kỳ từ nào:</strong> Hệ thống sẽ dịch ngay nghĩa tiếng Việt, phát âm chuẩn và cho phép lưu vào bộ Flashcard.
           </span>
         </div>
 
@@ -277,14 +290,14 @@ export default function TechNewsReader() {
                     <span
                       key={wIdx}
                       onClick={() => handleWordClick(w)}
-                      className={`inline-block px-1 mx-0.5 rounded-lg cursor-pointer transition-all duration-150 select-none ${
+                      className={`inline-block px-1 py-0.5 mx-0.5 rounded-lg cursor-pointer transition-all duration-150 select-none ${
                         isCurrentlySelected
                           ? "bg-primary text-primary-foreground font-black shadow-sm ring-2 ring-primary/40 scale-105"
                           : isKeyTechWord
                           ? "font-semibold text-primary underline decoration-primary/40 decoration-2 underline-offset-4 hover:bg-primary/10 hover:text-primary"
-                          : "hover:bg-secondary hover:text-foreground"
+                          : "hover:bg-secondary hover:text-foreground active:bg-primary/20"
                       }`}
-                      title="Bấm để tra nghĩa & nghe phát âm"
+                      title="Chạm vào để dịch nghĩa & nghe phát âm"
                     >
                       {w}
                     </span>
@@ -296,9 +309,9 @@ export default function TechNewsReader() {
         </div>
       </div>
 
-      {/* Floating Word Inspector Card / Sheet */}
+      {/* Floating Word Inspector Card / Sheet (Mobile & Desktop Friendly) */}
       {selectedWordData && (
-        <div className="fixed bottom-6 right-6 left-6 sm:left-auto sm:w-[420px] z-50 p-5 rounded-3xl border bg-card/95 backdrop-blur-xl shadow-2xl space-y-3.5 animate-in slide-in-from-bottom-5 duration-200 border-primary/30">
+        <div className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 left-4 sm:left-auto sm:w-[420px] z-50 p-5 rounded-3xl border bg-card/95 backdrop-blur-xl shadow-2xl space-y-3.5 animate-in slide-in-from-bottom-5 duration-200 border-primary/30 max-h-[85vh] overflow-y-auto">
           <div className="flex items-start justify-between border-b pb-3">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
@@ -308,6 +321,7 @@ export default function TechNewsReader() {
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-secondary uppercase text-muted-foreground">
                   {selectedWordData.partOfSpeech}
                 </span>
+                {isLoadingWord && <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />}
               </div>
               <p className="text-xs font-mono text-muted-foreground">{selectedWordData.ipa}</p>
             </div>
@@ -315,7 +329,7 @@ export default function TechNewsReader() {
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => speakWord(selectedWordData.word)}
-                className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center"
+                className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center shadow-sm"
                 title="Nghe phát âm từ này"
               >
                 <Volume2 className="h-4 w-4" />
@@ -329,12 +343,12 @@ export default function TechNewsReader() {
             </div>
           </div>
 
-          <div className="space-y-1.5 text-xs">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          <div className="space-y-2 text-xs">
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 block mb-0.5">
                 Nghĩa tiếng Việt
               </span>
-              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              <p className="text-sm font-bold text-emerald-800 dark:text-emerald-200">
                 {selectedWordData.vietnameseMeaning}
               </p>
             </div>
@@ -367,11 +381,11 @@ export default function TechNewsReader() {
             )}
           </div>
 
-          <div className="pt-2 border-t flex items-center justify-between">
+          <div className="pt-2 border-t flex items-center justify-between gap-2">
             <button
               onClick={handleSaveToSRS}
               disabled={savedToSRS}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
                 savedToSRS
                   ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
                   : "bg-primary text-white hover:bg-primary/90 shadow-md shadow-primary/20"
@@ -380,19 +394,19 @@ export default function TechNewsReader() {
               {savedToSRS ? (
                 <>
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>Đã lưu vào Flashcard SRS</span>
+                  <span>Đã lưu vào Flashcard</span>
                 </>
               ) : (
                 <>
                   <PlusCircle className="h-3.5 w-3.5" />
-                  <span>Lưu từ này vào Flashcard SRS</span>
+                  <span>Lưu từ vào Flashcard SRS</span>
                 </>
               )}
             </button>
 
             <button
               onClick={() => speakWord(selectedWordData.word)}
-              className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+              className="text-xs font-bold text-primary hover:underline flex items-center gap-1 px-2 py-2"
             >
               <Volume2 className="h-3.5 w-3.5" /> Nghe lại
             </button>

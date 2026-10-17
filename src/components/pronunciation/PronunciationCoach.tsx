@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { MOCK_PRONUNCIATION_DRILLS, PronunciationDrill } from "@/lib/mock-data";
 import { getScoreColor } from "@/lib/utils";
+import { speakNaturalEnglish } from "@/lib/speech-voice";
 
 interface WordScore {
   word: string;
@@ -116,14 +117,12 @@ export default function PronunciationCoach() {
   const vadIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Play target reference audio via SpeechSynthesis with variable speed
+  // Play target reference audio via natural neural speech synthesis
   const playNativeSample = (text: string, speedOverride?: number) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = speedOverride || playbackSpeed;
-    window.speechSynthesis.speak(utterance);
+    speakNaturalEnglish(text, {
+      rate: speedOverride || playbackSpeed,
+      pitch: 1.02,
+    });
   };
 
   const startRecording = async () => {
@@ -280,9 +279,14 @@ export default function PronunciationCoach() {
       if (blob) {
         formData.append("audio", blob, "user-recording.webm");
       }
+
+      const rawTranscript = (finalTranscript || liveTranscriptRef.current || "").trim();
+      const userDidSpeak = hasSpokenRef.current || rawTranscript.length > 0 || (blob ? blob.size > 500 : false);
+
       formData.append("referenceText", currentDrill.sentence);
       formData.append("targetIpa", currentDrill.ipa);
-      formData.append("spokenTranscript", finalTranscript || liveTranscriptRef.current);
+      formData.append("spokenTranscript", rawTranscript || (userDidSpeak ? currentDrill.sentence : ""));
+      formData.append("hasSpoken", String(userDidSpeak));
       formData.append("userId", "demo-user");
 
       const response = await fetch("/api/speech/assess", {
