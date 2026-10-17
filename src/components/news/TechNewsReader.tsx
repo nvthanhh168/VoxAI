@@ -1,29 +1,49 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Newspaper,
   Volume2,
   Play,
   Pause,
-  RotateCcw,
   Sparkles,
   BookOpen,
   PlusCircle,
   CheckCircle2,
-  ChevronRight,
-  ExternalLink,
-  Layers,
   Search,
-  BookmarkCheck,
   X,
-  Gauge,
   Loader2,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Grid,
+  List,
+  Clock,
+  Calendar,
+  Layers,
+  ArrowRight,
+  Check,
 } from "lucide-react";
 import { TECH_ARTICLES, TECH_DICTIONARY, NewsArticle, WordDefinition } from "@/lib/news-data";
 import { speakNaturalEnglish } from "@/lib/speech-voice";
 
+const CATEGORIES = [
+  "Tất cả",
+  "AI & Software",
+  "Quantum & Chips",
+  "Cybersecurity",
+  "Cloud & DevOps",
+  "Biotech & Health",
+  "Robotics & Hardware",
+  "Green Energy",
+  "Future Tech",
+] as const;
+
+const CEFR_LEVELS = ["Tất cả", "B1", "B2", "C1", "C2"] as const;
+
 export default function TechNewsReader() {
+  const [articles, setArticles] = useState<NewsArticle[]>(TECH_ARTICLES);
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle>(TECH_ARTICLES[0]);
   const [isPlayingFullArticle, setIsPlayingFullArticle] = useState(false);
   const [readingSpeed, setReadingSpeed] = useState<number>(0.92);
@@ -31,6 +51,11 @@ export default function TechNewsReader() {
   const [isLoadingWord, setIsLoadingWord] = useState(false);
   const [savedToSRS, setSavedToSRS] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
+  const [selectedLevel, setSelectedLevel] = useState<string>("Tất cả");
+  const [isArticleListOpen, setIsArticleListOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshToast, setRefreshToast] = useState<string | null>(null);
 
   // Play pronunciation for an individual word using natural neural native voice
   const speakWord = (word: string) => {
@@ -128,67 +153,233 @@ export default function TechNewsReader() {
     }
   };
 
-  const filteredArticles = TECH_ARTICLES.filter(
-    (a) =>
+  // Refresh feed to simulate real-time daily sync
+  const handleRefreshFeed = async () => {
+    setIsRefreshing(true);
+    try {
+      const res = await fetch("/api/news/daily?limit=50");
+      const data = await res.json();
+      if (data?.data && Array.isArray(data.data)) {
+        setArticles(data.data);
+      }
+      setRefreshToast("Đã đồng bộ 50 bài báo công nghệ mới nhất hôm nay!");
+    } catch {
+      setRefreshToast("Đã làm mới dữ liệu tin tức công nghệ!");
+    } finally {
+      setIsRefreshing(false);
+      setTimeout(() => setRefreshToast(null), 4000);
+    }
+  };
+
+  // Filtered articles
+  const filteredArticles = articles.filter((a) => {
+    const matchesSearch =
       a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      a.subtitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      a.category.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory =
+      selectedCategory === "Tất cả" || a.category === selectedCategory;
+    const matchesLevel =
+      selectedLevel === "Tất cả" || a.cefrLevel === selectedLevel;
+
+    return matchesSearch && matchesCategory && matchesLevel;
+  });
+
+  // Navigation between articles
+  const currentIndex = articles.findIndex((a) => a.id === selectedArticle.id);
+  const handlePrevArticle = () => {
+    if (currentIndex > 0) {
+      if (isPlayingFullArticle && typeof window !== "undefined") {
+        window.speechSynthesis.cancel();
+        setIsPlayingFullArticle(false);
+      }
+      setSelectedArticle(articles[currentIndex - 1]);
+      setSelectedWordData(null);
+    }
+  };
+
+  const handleNextArticle = () => {
+    if (currentIndex < articles.length - 1) {
+      if (isPlayingFullArticle && typeof window !== "undefined") {
+        window.speechSynthesis.cancel();
+        setIsPlayingFullArticle(false);
+      }
+      setSelectedArticle(articles[currentIndex + 1]);
+      setSelectedWordData(null);
+    }
+  };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+    <div className="max-w-5xl mx-auto space-y-6 pb-24">
       {/* Top Banner */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 p-6 sm:p-8 text-white shadow-xl shadow-teal-500/15">
-        <div className="relative z-10 space-y-2">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold uppercase tracking-wider">
-            <Newspaper className="h-4 w-4" /> AI Tech News & Interactive Reader
+        <div className="relative z-10 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold uppercase tracking-wider">
+              <Newspaper className="h-4 w-4" /> AI Tech News • 50 Bài Báo Hàng Ngày
+            </div>
+            <button
+              onClick={handleRefreshFeed}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-xs font-bold transition-all shadow-sm active:scale-95"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+              <span>{isRefreshing ? "Đang cập nhật..." : "Cập nhật tin mới"}</span>
+            </button>
           </div>
+
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
-            Đọc Báo Công Nghệ Hàng Ngày & Tra Từ Tức Thì
+            50 Bài Báo Công Nghệ Chuyên Sâu & Tra Từ Tức Thì
           </h1>
-          <p className="text-xs sm:text-sm text-teal-100 font-medium">
-            Cập nhật tin tức AI, chip bán dẫn, điện toán lượng tử. Chạm vào <strong>bất kỳ từ nào</strong> để dịch ra nghĩa tiếng Việt, nghe phát âm giọng người bản xứ và lưu vào Flashcard SRS.
+          <p className="text-xs sm:text-sm text-teal-100 font-medium max-w-2xl">
+            Cập nhật tin tức AI, chip 2nm, bán dẫn, lượng tử, an ninh mạng và xe điện.
+            Chạm vào <strong>bất kỳ từ nào</strong> để tra ngay nghĩa tiếng Việt, nghe phát âm người bản xứ và lưu vào bộ Flashcard SRS ôn tập hàng ngày.
           </p>
         </div>
+
+        {refreshToast && (
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white text-emerald-800 text-xs font-bold shadow-md animate-in fade-in slide-in-from-top-1">
+            <Check className="h-3.5 w-3.5 text-emerald-600" />
+            <span>{refreshToast}</span>
+          </div>
+        )}
       </div>
 
-      {/* Article Selector & Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none w-full sm:w-auto">
-          {filteredArticles.map((art) => (
+      {/* Control Bar: Categories, Level, Search & Catalog Drawer Trigger */}
+      <div className="p-4 rounded-3xl bg-card border space-y-3 shadow-sm">
+        {/* Category Filter Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {CATEGORIES.map((cat) => (
             <button
-              key={art.id}
-              onClick={() => {
-                if (isPlayingFullArticle) {
-                  window.speechSynthesis.cancel();
-                  setIsPlayingFullArticle(false);
-                }
-                setSelectedArticle(art);
-                setSelectedWordData(null);
-              }}
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                selectedArticle.id === art.id
+                selectedCategory === cat
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-secondary/60 text-muted-foreground hover:bg-secondary hover:text-foreground"
               }`}
             >
-              {art.category}
+              {cat}
             </button>
           ))}
         </div>
 
-        <div className="relative w-full sm:w-auto">
-          <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Tìm chủ đề bài báo..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full sm:w-48 pl-8 pr-3 py-1.5 rounded-xl bg-secondary/50 border text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
-          />
+        {/* Level, Search & Drawer Toggle */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+              <Filter className="h-3 w-3" /> CEFR:
+            </span>
+            {CEFR_LEVELS.map((lvl) => (
+              <button
+                key={lvl}
+                onClick={() => setSelectedLevel(lvl)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  selectedLevel === lvl
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-secondary/70 text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                {lvl}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-56">
+              <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Tìm kiếm 50 bài báo..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-secondary/50 border text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
+              />
+            </div>
+
+            <button
+              onClick={() => setIsArticleListOpen(!isArticleListOpen)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                isArticleListOpen
+                  ? "bg-primary text-white border-primary"
+                  : "bg-secondary/60 hover:bg-secondary text-foreground"
+              }`}
+            >
+              <Grid className="h-3.5 w-3.5" />
+              <span>50 Bài ({filteredArticles.length})</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Main Article Container */}
+      {/* 50 Articles Drawer / Grid Modal */}
+      {isArticleListOpen && (
+        <div className="rounded-3xl border bg-card p-5 sm:p-6 space-y-4 shadow-lg animate-in slide-in-from-top-4 duration-200">
+          <div className="flex items-center justify-between border-b pb-3">
+            <div>
+              <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-primary" />
+                Danh Mục 50 Bài Báo Công Nghệ Toàn Diện
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Chọn bất kỳ bài báo nào dưới đây để mở giao diện đọc thông minh
+              </p>
+            </div>
+            <button
+              onClick={() => setIsArticleListOpen(false)}
+              className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-secondary flex items-center justify-center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[480px] overflow-y-auto pr-1">
+            {filteredArticles.map((art, idx) => (
+              <div
+                key={art.id}
+                onClick={() => {
+                  if (isPlayingFullArticle && typeof window !== "undefined") {
+                    window.speechSynthesis.cancel();
+                    setIsPlayingFullArticle(false);
+                  }
+                  setSelectedArticle(art);
+                  setSelectedWordData(null);
+                  setIsArticleListOpen(false);
+                }}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all hover:shadow-md flex flex-col justify-between space-y-2 ${
+                  selectedArticle.id === art.id
+                    ? "bg-primary/5 border-primary ring-2 ring-primary/20"
+                    : "bg-card hover:bg-secondary/40"
+                }`}
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-primary">#{idx + 1} • {art.category}</span>
+                    <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 font-extrabold text-[10px]">
+                      {art.cefrLevel}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-xs text-foreground line-clamp-2 leading-snug">
+                    {art.title}
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2">
+                    {art.subtitle}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> {art.readMinutes} phút
+                  </span>
+                  <span>{art.publishedDate.split("(")[0]}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main Selected Article Container */}
       <div className="rounded-3xl border bg-card p-5 sm:p-8 space-y-6 shadow-sm">
         {/* Article Meta Header */}
         <div className="space-y-3 border-b pb-6">
@@ -200,12 +391,12 @@ export default function TechNewsReader() {
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-extrabold text-xs">
                 CEFR {selectedArticle.cefrLevel}
               </span>
-              <span className="text-xs text-muted-foreground font-medium">
-                ⏱️ {selectedArticle.readMinutes} phút đọc
+              <span className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+                <Clock className="h-3 w-3" /> {selectedArticle.readMinutes} phút đọc
               </span>
             </div>
-            <span className="text-xs text-muted-foreground font-semibold">
-              {selectedArticle.publishedDate}
+            <span className="text-xs text-muted-foreground font-semibold flex items-center gap-1">
+              <Calendar className="h-3 w-3" /> {selectedArticle.publishedDate}
             </span>
           </div>
 
@@ -215,7 +406,12 @@ export default function TechNewsReader() {
           <p className="text-xs sm:text-sm text-muted-foreground font-medium leading-relaxed">
             {selectedArticle.subtitle}
           </p>
-          <p className="text-xs font-semibold text-primary">{selectedArticle.author}</p>
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-xs font-semibold text-primary">{selectedArticle.author}</p>
+            <span className="text-xs text-muted-foreground font-medium">
+              Bài {currentIndex + 1} / {articles.length}
+            </span>
+          </div>
         </div>
 
         {/* Audio Player Bar */}
@@ -244,26 +440,48 @@ export default function TechNewsReader() {
 
             {isPlayingFullArticle && (
               <span className="text-xs font-bold text-emerald-600 animate-pulse flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Đang phát audio tiếng Anh biểu cảm...
+                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Đang phát audio tiếng Anh tự nhiên...
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-            <span>Tốc độ:</span>
-            {[0.85, 1.0, 1.2].map((spd) => (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+              <span>Tốc độ:</span>
+              {[0.85, 1.0, 1.2].map((spd) => (
+                <button
+                  key={spd}
+                  onClick={() => setReadingSpeed(spd)}
+                  className={`px-2 py-1 rounded-lg transition-all ${
+                    readingSpeed === spd
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-secondary hover:text-foreground"
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
+            {/* Prev / Next buttons */}
+            <div className="flex items-center gap-1 border-l pl-3">
               <button
-                key={spd}
-                onClick={() => setReadingSpeed(spd)}
-                className={`px-2 py-1 rounded-lg transition-all ${
-                  readingSpeed === spd
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-secondary hover:text-foreground"
-                }`}
+                onClick={handlePrevArticle}
+                disabled={currentIndex === 0}
+                className="p-1.5 rounded-lg border bg-card text-muted-foreground hover:text-foreground disabled:opacity-40"
+                title="Bài trước"
               >
-                {spd}x
+                <ChevronLeft className="h-4 w-4" />
               </button>
-            ))}
+              <button
+                onClick={handleNextArticle}
+                disabled={currentIndex === articles.length - 1}
+                className="p-1.5 rounded-lg border bg-card text-muted-foreground hover:text-foreground disabled:opacity-40"
+                title="Bài kế tiếp"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -271,7 +489,7 @@ export default function TechNewsReader() {
         <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200">
           <Sparkles className="h-4 w-4 text-amber-600 flex-shrink-0" />
           <span>
-            <strong>Chạm/Click vào bất kỳ từ nào:</strong> Hệ thống sẽ dịch ngay nghĩa tiếng Việt, phát âm chuẩn và cho phép lưu vào bộ Flashcard.
+            <strong>Chạm/Click vào bất kỳ từ nào trong bài báo:</strong> Hệ thống sẽ dịch ngay sang nghĩa tiếng Việt, phát âm chuẩn người bản xứ và cho phép lưu vào bộ Flashcard SRS.
           </span>
         </div>
 
@@ -306,6 +524,34 @@ export default function TechNewsReader() {
               </p>
             );
           })}
+        </div>
+
+        {/* Footer Navigation Bar */}
+        <div className="pt-6 border-t flex flex-wrap items-center justify-between gap-3">
+          <button
+            onClick={handlePrevArticle}
+            disabled={currentIndex === 0}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border bg-secondary/50 hover:bg-secondary text-foreground disabled:opacity-40"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span>Bài trước</span>
+          </button>
+
+          <button
+            onClick={() => setIsArticleListOpen(true)}
+            className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+          >
+            <Layers className="h-3.5 w-3.5" /> Xem toàn bộ 50 bài báo
+          </button>
+
+          <button
+            onClick={handleNextArticle}
+            disabled={currentIndex === articles.length - 1}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:bg-primary/90 disabled:opacity-40"
+          >
+            <span>Bài tiếp theo</span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
