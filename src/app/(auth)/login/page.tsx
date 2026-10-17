@@ -4,12 +4,12 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Mic, ArrowRight, Lock, Mail, RefreshCw, Zap } from "lucide-react";
+import { Mic, ArrowRight, Lock, Mail, RefreshCw, Zap, ShieldCheck } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("demo@voxai.com");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("admin@voxai.com");
+  const [password, setPassword] = useState("admin123");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -25,18 +25,18 @@ export default function LoginPage() {
       });
 
       if (res?.error) {
-        // If credentials error, allow direct transition to demo dashboard
+        // If credentials error, allow direct transition to demo dashboard or admin
         if (userEmail === "demo@voxai.com" || userEmail === "admin@voxai.com") {
-          router.push("/dashboard");
+          router.push(userEmail === "admin@voxai.com" ? "/admin" : "/dashboard");
           return;
         }
-        setErrorMsg("Email hoặc mật khẩu không chính xác. Bạn có thể bấm 'Đăng nhập nhanh Demo'.");
+        setErrorMsg("Email hoặc mật khẩu không chính xác. Bạn có thể bấm 'Đăng nhập Admin' hoặc 'Demo'.");
       } else {
-        router.push("/dashboard");
+        router.push(userEmail === "admin@voxai.com" ? "/admin" : "/dashboard");
       }
     } catch {
       // Fallback direct navigate
-      router.push("/dashboard");
+      router.push(userEmail === "admin@voxai.com" ? "/admin" : "/dashboard");
     } finally {
       setIsLoading(false);
     }
@@ -45,6 +45,12 @@ export default function LoginPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     doLogin(email, password);
+  };
+
+  const handleAdminLogin = () => {
+    setEmail("admin@voxai.com");
+    setPassword("admin123");
+    doLogin("admin@voxai.com", "admin123");
   };
 
   const handleQuickDemo = () => {
@@ -115,19 +121,37 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* 1-Click Instant Demo Login Button */}
-        <button
-          type="button"
-          onClick={handleQuickDemo}
-          disabled={isLoading}
-          className="w-full py-2.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs transition-all flex items-center justify-center gap-2"
-        >
-          <Zap className="h-4 w-4" />
-          <span>Vào ngay bằng tài khoản Demo (1-Click)</span>
-        </button>
+        <div className="space-y-2 pt-1">
+          {/* 1-Click Super Admin Login Button */}
+          <button
+            type="button"
+            onClick={handleAdminLogin}
+            disabled={isLoading}
+            className="w-full py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/25 transition-all flex items-center justify-center gap-2"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>Đăng nhập quyền Admin Toàn Năng (Mở khóa 100% tính năng)</span>
+          </button>
 
-        <div className="p-3 rounded-2xl bg-secondary/60 text-center text-xs text-muted-foreground">
-          <span className="font-bold">Tài khoản mẫu:</span> demo@voxai.com / password123
+          {/* 1-Click Instant Demo Login Button */}
+          <button
+            type="button"
+            onClick={handleQuickDemo}
+            disabled={isLoading}
+            className="w-full py-2.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs transition-all flex items-center justify-center gap-2"
+          >
+            <Zap className="h-4 w-4" />
+            <span>Đăng nhập tài khoản Học viên Mẫu (demo@voxai.com)</span>
+          </button>
+        </div>
+
+        <div className="p-3 rounded-2xl bg-secondary/60 text-center text-xs text-muted-foreground space-y-1">
+          <div>
+            <span className="font-bold text-indigo-600 dark:text-indigo-400">Admin Toàn Quyền:</span> admin@voxai.com / admin123
+          </div>
+          <div>
+            <span className="font-bold text-emerald-600 dark:text-emerald-400">Học viên Mẫu:</span> demo@voxai.com / password123
+          </div>
         </div>
 
         <div className="text-center text-xs text-muted-foreground">

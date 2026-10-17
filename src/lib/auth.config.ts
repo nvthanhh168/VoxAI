@@ -26,7 +26,7 @@ export const authConfig: NextAuthConfig = {
 
         // Instant demo check for smooth offline/local testing
         const isDemo = email === "demo@voxai.com" || email === "admin@voxai.com";
-        const isDemoPassword = password === "password123";
+        const isDemoPassword = password === "password123" || password === "admin123";
 
         try {
           const user = await prisma.user.findUnique({
@@ -53,12 +53,12 @@ export const authConfig: NextAuthConfig = {
               const newUser = await prisma.user.create({
                 data: {
                   email,
-                  name: email === "admin@voxai.com" ? "Admin Master" : "Alex Rivera",
+                  name: email === "admin@voxai.com" ? "Super Administrator" : "Alex Rivera",
                   passwordHash: hash,
                   role: email === "admin@voxai.com" ? "ADMIN" : "USER",
-                  cefrLevel: "B2",
-                  xp: 1450,
-                  streakDays: 14,
+                  cefrLevel: email === "admin@voxai.com" ? "C2" : "B2",
+                  xp: email === "admin@voxai.com" ? 99999 : 1450,
+                  streakDays: email === "admin@voxai.com" ? 365 : 14,
                 },
               });
               return {
@@ -79,11 +79,11 @@ export const authConfig: NextAuthConfig = {
         // Offline / fallback demo authentication
         if (isDemo && (isDemoPassword || password.length > 0)) {
           return {
-            id: email === "admin@voxai.com" ? "demo-admin-id" : "demo-user-id",
-            name: email === "admin@voxai.com" ? "Admin Master" : "Alex Rivera",
+            id: email === "admin@voxai.com" ? "admin-master-id" : "demo-user-id",
+            name: email === "admin@voxai.com" ? "Super Administrator" : "Alex Rivera",
             email: email,
             role: email === "admin@voxai.com" ? "ADMIN" : "USER",
-            cefrLevel: "B2",
+            cefrLevel: email === "admin@voxai.com" ? "C2" : "B2",
           };
         }
 

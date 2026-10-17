@@ -16,6 +16,7 @@ import {
   Settings,
   ShieldCheck,
   CheckCircle2,
+  Newspaper,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,12 +24,13 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/practice", label: "Pronunciation Practice", icon: Mic, highlight: true },
   { href: "/speaking-partner", label: "AI Speaking Partner", icon: MessageSquare, badge: "Voice" },
+  { href: "/news", label: "Đọc báo Công nghệ", icon: Newspaper, badge: "Hot" },
   { href: "/ielts-test", label: "Mock IELTS Speaking", icon: Award, badge: "Band 9" },
   { href: "/toeic-test", label: "Mock TOEIC Speaking", icon: GraduationCap, badge: "ETS" },
   { href: "/vocabulary", label: "Vocabulary (SRS)", icon: BookOpen },
   { href: "/grammar-coach", label: "Grammar Coach", icon: Sparkles },
-  { href: "/placement-test", label: "Placement Test", icon: GraduationCap },
   { href: "/learning-path", label: "Learning Roadmap", icon: Compass },
+  { href: "/placement-test", label: "Placement Test", icon: GraduationCap },
   { href: "/leaderboard", label: "Leaderboard & XP", icon: Trophy },
   { href: "/subscription", label: "Pricing & Plans", icon: Crown },
   { href: "/admin", label: "Admin Portal", icon: ShieldCheck },
