@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice, stopAllSpeech } from "@/lib/speech-voice";
 
 interface Message {
   id: string;
@@ -146,6 +146,7 @@ export default function VoicePartner() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(true);
   const [sessionEvaluation, setSessionEvaluation] = useState<any>(null);
+  const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -156,19 +157,68 @@ export default function VoicePartner() {
   const vadIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const activeAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, liveTranscript]);
 
   const speakText = (text: string) => {
-    speakNaturalEnglish(text, { rate: 0.94, pitch: 1.02 });
+    playNeuralVoice(text, { rate: 0.95, pitch: 1.02 });
   };
 
-  const playUserVoice = (audioUrl?: string) => {
+  const playUserVoice = async (audioUrl?: string, msgId?: string) => {
     if (!audioUrl) return;
-    const audio = new Audio(audioUrl);
-    audio.play();
+
+    if (playingMsgId === msgId) {
+      if (activeAudioPlayerRef.current) {
+        try {
+          activeAudioPlayerRef.current.pause();
+          activeAudioPlayerRef.current.currentTime = 0;
+        } catch {}
+      }
+      setPlayingMsgId(null);
+      return;
+    }
+
+    setPlayingMsgId(msgId || null);
+
+    try {
+      const audio = new Audio(audioUrl);
+      activeAudioPlayerRef.current = audio;
+      audio.volume = 1.0;
+
+      audio.onended = () => {
+        setPlayingMsgId(null);
+      };
+
+      audio.onerror = async () => {
+        console.warn("Direct HTML5 audio error, trying Web Audio API decode...");
+        try {
+          const res = await fetch(audioUrl);
+          const buf = await res.arrayBuffer();
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AudioCtx();
+          const decoded = await ctx.decodeAudioData(buf);
+          const srcNode = ctx.createBufferSource();
+          srcNode.buffer = decoded;
+          srcNode.connect(ctx.destination);
+          srcNode.onended = () => {
+            setPlayingMsgId(null);
+            try { ctx.close(); } catch {}
+          };
+          srcNode.start(0);
+        } catch (e) {
+          console.error("Web audio fallback error:", e);
+          setPlayingMsgId(null);
+        }
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.warn("Audio play exception:", err);
+      setPlayingMsgId(null);
+    }
   };
 
   const handleScenarioChange = (scenario: typeof SCENARIOS[0]) => {
@@ -232,17 +282,31 @@ export default function VoicePartner() {
         }
       }
 
-      // 2. Capture raw audio stream for playback and server
+      // 2. Capture raw audio stream with dynamic MIME support
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      let mimeType = "audio/webm;codecs=opus";
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported) {
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : "";
+        }
+      }
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const actualMime = mediaRecorder.mimeType || mimeType || "audio/webm";
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
         const voiceUrl = URL.createObjectURL(audioBlob);
         const transcriptText = liveTranscriptRef.current;
         await sendTurn(audioBlob, transcriptText, voiceUrl);
@@ -320,6 +384,9 @@ export default function VoicePartner() {
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      try {
+        mediaRecorderRef.current.requestData();
+      } catch {}
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);
@@ -525,12 +592,25 @@ export default function VoicePartner() {
                     ) : (
                       msg.audioUrl && (
                         <button
-                          onClick={() => playUserVoice(msg.audioUrl)}
-                          className="text-primary-foreground/90 hover:text-white p-1 flex items-center gap-1 text-[11px] font-bold bg-white/10 rounded-lg px-2"
+                          onClick={() => playUserVoice(msg.audioUrl, msg.id)}
+                          className={`p-1 flex items-center gap-1 text-[11px] font-bold rounded-lg px-2.5 py-1 transition-all ${
+                            playingMsgId === msg.id
+                              ? "bg-white text-primary font-black animate-pulse shadow-sm"
+                              : "bg-white/20 hover:bg-white/30 text-white"
+                          }`}
                           title="Nghe lại bản thu âm của bạn"
                         >
-                          <Play className="h-3 w-3 fill-current" />
-                          <span>Nghe lại</span>
+                          {playingMsgId === msg.id ? (
+                            <>
+                              <Square className="h-3 w-3 fill-current" />
+                              <span>Đang phát...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-3 w-3 fill-current" />
+                              <span>Nghe lại</span>
+                            </>
+                          )}
                         </button>
                       )
                     )}

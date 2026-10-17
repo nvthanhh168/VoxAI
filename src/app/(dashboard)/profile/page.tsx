@@ -20,7 +20,7 @@ import {
   Play,
   RotateCcw,
 } from "lucide-react";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice } from "@/lib/speech-voice";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -31,7 +31,7 @@ export default function ProfilePage() {
   const [isSaved, setIsSaved] = useState(false);
 
   const testVoice = () => {
-    speakNaturalEnglish(
+    playNeuralVoice(
       "Hello! This is your native AI voice assistant for VoxAI. Your English pronunciation and conversation sessions will sound expressive and natural.",
       { rate: voiceRate, pitch: 1.02 }
     );

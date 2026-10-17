@@ -16,7 +16,7 @@ import {
   Filter,
 } from "lucide-react";
 import { MOCK_VOCABULARY_CARDS, VocabCard } from "@/lib/mock-data";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice } from "@/lib/speech-voice";
 
 const CATEGORIES = [
   { id: "ALL", label: "Tất cả chủ đề" },
@@ -57,7 +57,7 @@ export default function FlashcardSRS() {
 
   const playPronunciation = (e: React.MouseEvent, text: string) => {
     e.stopPropagation();
-    speakNaturalEnglish(text, { rate: 0.88, pitch: 1.02 });
+    playNeuralVoice(text, { rate: 0.9, pitch: 1.02 });
   };
 
   const handleSM2Review = async (qualityRating: number) => {

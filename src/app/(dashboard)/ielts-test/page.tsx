@@ -16,7 +16,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice } from "@/lib/speech-voice";
 
 interface IELTSPart {
   partNumber: number;
@@ -78,7 +78,7 @@ export default function MockIELTSTestPage() {
   const recognitionRef = useRef<any>(null);
 
   const speakExaminerPrompt = (text: string) => {
-    speakNaturalEnglish(text, { rate: 0.92, pitch: 1.0 });
+    playNeuralVoice(text, { rate: 0.95, pitch: 1.0, voiceGender: "male" });
   };
 
   const startPreparation = () => {
@@ -149,6 +149,9 @@ export default function MockIELTSTestPage() {
       } catch {}
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      try {
+        mediaRecorderRef.current.requestData();
+      } catch {}
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);

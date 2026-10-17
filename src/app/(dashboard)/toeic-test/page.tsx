@@ -16,7 +16,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice } from "@/lib/speech-voice";
 
 interface TOEICQuestion {
   number: number;
@@ -96,7 +96,7 @@ export default function MockTOEICTestPage() {
   const recognitionRef = useRef<any>(null);
 
   const playAudio = (text: string) => {
-    speakNaturalEnglish(text, { rate: 0.92, pitch: 1.0 });
+    playNeuralVoice(text, { rate: 0.95, pitch: 1.0 });
   };
 
   const startPreparation = () => {
@@ -172,6 +172,9 @@ export default function MockTOEICTestPage() {
       } catch {}
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      try {
+        mediaRecorderRef.current.requestData();
+      } catch {}
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);

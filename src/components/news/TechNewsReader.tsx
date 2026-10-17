@@ -26,7 +26,7 @@ import {
   Check,
 } from "lucide-react";
 import { TECH_ARTICLES, TECH_DICTIONARY, NewsArticle, WordDefinition } from "@/lib/news-data";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice, stopAllSpeech } from "@/lib/speech-voice";
 
 const CATEGORIES = [
   "Tất cả",
@@ -56,30 +56,40 @@ export default function TechNewsReader() {
   const [isArticleListOpen, setIsArticleListOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshToast, setRefreshToast] = useState<string | null>(null);
+  const [activeSpokenSentence, setActiveSpokenSentence] = useState<string | null>(null);
 
-  // Play pronunciation for an individual word using natural neural native voice
+  // Play pronunciation for an individual word using studio neural native voice
   const speakWord = (word: string) => {
-    speakNaturalEnglish(word, { rate: 0.88, pitch: 1.02 });
+    playNeuralVoice(word, { rate: 0.9, pitch: 1.02 });
   };
 
-  // Full article narration with expressive natural voice
+  // Full article narration with expressive studio neural voice & sentence chaining
   const togglePlayArticle = () => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-
     if (isPlayingFullArticle) {
-      window.speechSynthesis.cancel();
+      stopAllSpeech();
       setIsPlayingFullArticle(false);
+      setActiveSpokenSentence(null);
       return;
     }
 
     const fullText = `${selectedArticle.title}. ${selectedArticle.paragraphs.join(" ")}`;
-    speakNaturalEnglish(fullText, {
+    setIsPlayingFullArticle(true);
+
+    playNeuralVoice(fullText, {
       rate: readingSpeed,
       pitch: 1.0,
-      onEnd: () => setIsPlayingFullArticle(false),
-      onError: () => setIsPlayingFullArticle(false),
+      onSentenceStart: (_idx, sentence) => {
+        setActiveSpokenSentence(sentence);
+      },
+      onEnd: () => {
+        setIsPlayingFullArticle(false);
+        setActiveSpokenSentence(null);
+      },
+      onError: () => {
+        setIsPlayingFullArticle(false);
+        setActiveSpokenSentence(null);
+      },
     });
-    setIsPlayingFullArticle(true);
   };
 
   // Click on any word in the article: instant lookup & translation

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { MOCK_PRONUNCIATION_DRILLS, PronunciationDrill } from "@/lib/mock-data";
 import { getScoreColor } from "@/lib/utils";
-import { speakNaturalEnglish } from "@/lib/speech-voice";
+import { speakNaturalEnglish, playNeuralVoice, stopAllSpeech } from "@/lib/speech-voice";
 
 interface WordScore {
   word: string;
@@ -100,6 +100,8 @@ export default function PronunciationCoach() {
   const [assessment, setAssessment] = useState<AssessmentData | null>(null);
   const [selectedWord, setSelectedWord] = useState<WordScore | null>(null);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
+  const [isPlayingUserAudio, setIsPlayingUserAudio] = useState(false);
   const [xpGained, setXpGained] = useState<number | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string>("");
   const [audioLevel, setAudioLevel] = useState<number>(0);
@@ -116,13 +118,74 @@ export default function PronunciationCoach() {
   const lastSoundTimestampRef = useRef<number>(0);
   const vadIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const userAudioElementRef = useRef<HTMLAudioElement | null>(null);
 
-  // Play target reference audio via natural neural speech synthesis
+  // Play target reference audio via High-Definition Neural Voice
   const playNativeSample = (text: string, speedOverride?: number) => {
-    speakNaturalEnglish(text, {
+    playNeuralVoice(text, {
       rate: speedOverride || playbackSpeed,
       pitch: 1.02,
     });
+  };
+
+  // Play user recorded audio with 100% reliable fallback (HTML5 + Web Audio API)
+  const playUserRecordedVoice = async () => {
+    if (!recordedAudioUrl && !recordedAudioBlob) return;
+
+    if (isPlayingUserAudio) {
+      if (userAudioElementRef.current) {
+        try {
+          userAudioElementRef.current.pause();
+          userAudioElementRef.current.currentTime = 0;
+        } catch {}
+      }
+      setIsPlayingUserAudio(false);
+      return;
+    }
+
+    setIsPlayingUserAudio(true);
+
+    try {
+      const audio = new Audio(recordedAudioUrl!);
+      userAudioElementRef.current = audio;
+      audio.volume = 1.0;
+
+      audio.onended = () => {
+        setIsPlayingUserAudio(false);
+      };
+
+      audio.onerror = async () => {
+        console.warn("HTML5 audio playback error, falling back to Web Audio API...");
+        await playViaWebAudio(recordedAudioBlob!);
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.warn("Direct audio play exception, falling back to Web Audio API:", err);
+      await playViaWebAudio(recordedAudioBlob!);
+    }
+  };
+
+  const playViaWebAudio = async (blob: Blob) => {
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        setIsPlayingUserAudio(false);
+        try {
+          ctx.close();
+        } catch {}
+      };
+      source.start(0);
+    } catch (webAudioErr) {
+      console.error("Web Audio API decode fallback failed:", webAudioErr);
+      setIsPlayingUserAudio(false);
+    }
   };
 
   const startRecording = async () => {
@@ -176,19 +239,42 @@ export default function PronunciationCoach() {
         }
       }
 
-      // 2. Capture audio stream with MediaRecorder
+      // 2. Capture audio stream with MediaRecorder and dynamic MIME support
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      let mimeType = "audio/webm;codecs=opus";
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported) {
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : "";
+        }
+      }
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const actualMime = mediaRecorder.mimeType || mimeType || "audio/webm";
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
+        setRecordedAudioBlob(audioBlob);
+
+        // Revoke previous URL if any
+        if (recordedAudioUrl) {
+          try {
+            URL.revokeObjectURL(recordedAudioUrl);
+          } catch {}
+        }
+
         const audioUrl = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(audioUrl);
         await submitRecording(audioBlob, liveTranscriptRef.current);
@@ -267,6 +353,9 @@ export default function PronunciationCoach() {
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      try {
+        mediaRecorderRef.current.requestData();
+      } catch {}
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);
@@ -747,23 +836,62 @@ export default function PronunciationCoach() {
 
           {/* Student Audio Playback & Voice Comparison */}
           {recordedAudioUrl && (
-            <div className="p-4 rounded-2xl bg-secondary/50 border space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="p-4 sm:p-5 rounded-2xl bg-secondary/50 border space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-foreground flex items-center gap-2">
-                  <Play className="h-4 w-4 text-primary fill-primary" />
+                  <Headphones className="h-4 w-4 text-primary" />
                   Nghe lại bản thu âm của bạn:
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => playNativeSample(currentDrill.sentence)}
-                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1 bg-primary/10 px-2.5 py-1 rounded-lg"
                   >
                     <Volume2 className="h-3.5 w-3.5" /> Nghe giọng mẫu ({playbackSpeed}x)
                   </button>
                 </div>
               </div>
 
-              <audio src={recordedAudioUrl} controls className="w-full h-10 rounded-xl" />
+              {/* Dedicated 1-Click Universal Playback Controller */}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button
+                  onClick={playUserRecordedVoice}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition-all ${
+                    isPlayingUserAudio
+                      ? "bg-rose-500 text-white hover:bg-rose-600 animate-pulse"
+                      : "bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95"
+                  }`}
+                >
+                  {isPlayingUserAudio ? (
+                    <>
+                      <Square className="h-3.5 w-3.5 fill-white" />
+                      <span>Đang phát lại... (Bấm để dừng)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5 fill-white" />
+                      <span>Phát lại giọng thu âm của bạn (1-Click)</span>
+                    </>
+                  )}
+                </button>
+
+                {isPlayingUserAudio && (
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                    Đang phát audio...
+                  </span>
+                )}
+              </div>
+
+              <audio
+                src={recordedAudioUrl}
+                controls
+                preload="auto"
+                className="w-full h-10 rounded-xl"
+                onPlay={() => setIsPlayingUserAudio(true)}
+                onPause={() => setIsPlayingUserAudio(false)}
+                onEnded={() => setIsPlayingUserAudio(false)}
+              />
 
               <div className="text-xs text-muted-foreground pt-1 flex items-start gap-1">
                 <span className="font-bold text-foreground">Hệ thống nhận diện được:</span>
